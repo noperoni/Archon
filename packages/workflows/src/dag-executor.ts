@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { basename, isAbsolute, join as joinPath, resolve as resolvePath, sep } from 'path';
 import { execFileAsync, resolveBashPath } from '@archon/git';
+import { assertDangerGatePasses } from './hk47-gate';
 import { discoverScriptsForCwd } from './script-discovery';
 import { discoverWorkflowsWithConfig, resolveWorkflowCommandContents } from './workflow-discovery';
 import {
@@ -3573,6 +3574,8 @@ async function runSubprocess(
     options.protectedCredentialValues
   );
   const { logDir, workflowRunId, nodeId, label } = options.retention;
+  // HK-47 fork: judged on the host for both execution modes, before anything runs.
+  await assertDangerGatePasses(cmd, args, options.cwd, workflowRunId);
   // Container env is delivered in argv, while either execution mode can echo a
   // credential in output. Sanitize at the shared boundaries below so every downstream
   // reader — the rejection's consumers and the retained evidence alike — sees the same
