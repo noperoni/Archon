@@ -32,6 +32,7 @@ test('registering and instantiating the Copilot provider does not eagerly load t
   clearRegistry();
   registerCommunityProviders();
 
+  process.env.HK47_ALLOW_PROVIDERS = 'copilot'; // HK-47 fork refuses non-claude by default
   const provider = getAgentProvider('copilot');
   expect(provider.getType()).toBe('copilot');
   expect(provider.getCapabilities()).toBeDefined();

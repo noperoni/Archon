@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeEach, beforeAll, afterAll } from 'bun:test';
 import {
   getAgentProvider,
   getProviderCapabilities,
@@ -65,6 +65,26 @@ describe('registry', () => {
   beforeEach(() => {
     clearRegistry();
     registerBuiltinProviders();
+  });
+
+  // HK-47 fork: upstream tests exercise every provider, so they run allowed.
+  const savedAllow = process.env.HK47_ALLOW_PROVIDERS;
+  beforeAll(() => {
+    process.env.HK47_ALLOW_PROVIDERS = 'codex,my-llm,pi,copilot,opencode';
+  });
+  afterAll(() => {
+    if (savedAllow === undefined) delete process.env.HK47_ALLOW_PROVIDERS;
+    else process.env.HK47_ALLOW_PROVIDERS = savedAllow;
+  });
+
+  test('HK-47 fork refuses a provider that is not allowed', () => {
+    process.env.HK47_ALLOW_PROVIDERS = '';
+    try {
+      expect(() => getAgentProvider('codex')).toThrow('refused by the HK-47 fork');
+      expect(getAgentProvider('claude').getType()).toBe('claude');
+    } finally {
+      process.env.HK47_ALLOW_PROVIDERS = 'codex,my-llm,pi,copilot,opencode';
+    }
   });
 
   describe('getAgentProvider', () => {

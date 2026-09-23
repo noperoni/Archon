@@ -62,6 +62,16 @@ export function getAgentProvider(id: string): IAgentProvider {
   if (!entry) {
     throw new UnknownProviderError(id, [...registry.keys()]);
   }
+  // HK-47 fork (PERS-15 gap 2): only Claude reads the user's PreToolUse hooks, so
+  // any other provider runs its tools past the danger gate. Refused unless named
+  // in HK47_ALLOW_PROVIDERS (comma-separated).
+  const allowed = (process.env.HK47_ALLOW_PROVIDERS ?? '').split(',').map(s => s.trim());
+  if (id !== 'claude' && !allowed.includes(id)) {
+    throw new Error(
+      `Provider '${id}' is refused by the HK-47 fork: it does not run the danger gate. ` +
+        `Set HK47_ALLOW_PROVIDERS=${id} to allow it anyway.`
+    );
+  }
   getLog().debug({ provider: id }, 'provider_selected');
   return entry.factory();
 }

@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { join } from 'path';
 import { getArchonHome } from '@archon/paths';
 import { ContainerBackend } from './container';
@@ -81,6 +81,41 @@ function fakeDocker(
   runner.calls = calls;
   return runner;
 }
+
+// HK-47 fork: upstream tests exercise the backend, so containers run allowed here.
+const savedAllowContainer = process.env.HK47_ALLOW_CONTAINER;
+beforeAll(() => {
+  process.env.HK47_ALLOW_CONTAINER = '1';
+});
+afterAll(() => {
+  if (savedAllowContainer === undefined) delete process.env.HK47_ALLOW_CONTAINER;
+  else process.env.HK47_ALLOW_CONTAINER = savedAllowContainer;
+});
+
+describe('HK-47 fork container refusal', () => {
+  test('prepare and resumeEnv refuse without HK47_ALLOW_CONTAINER, before any docker work', async () => {
+    delete process.env.HK47_ALLOW_CONTAINER;
+    const calls: string[][] = [];
+    const docker = fakeDocker(args => {
+      calls.push(args);
+      return { stdout: '', stderr: '' };
+    });
+    const backend = new ContainerBackend({
+      store: fakeStore(),
+      config: CONFIG,
+      dockerRunner: docker,
+    });
+    try {
+      await expect(backend.prepare({ codebase: FOLDER })).rejects.toThrow(
+        'refused by the HK-47 fork'
+      );
+      await expect(backend.resumeEnv('any')).rejects.toThrow('refused by the HK-47 fork');
+      expect(calls).toHaveLength(0);
+    } finally {
+      process.env.HK47_ALLOW_CONTAINER = '1';
+    }
+  });
+});
 
 describe('ContainerBackend.prepare', () => {
   test('prefers fuse mode (no CAP_SYS_ADMIN) with labels, mounts, and resource limits', async () => {

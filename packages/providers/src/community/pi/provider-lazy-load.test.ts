@@ -44,6 +44,7 @@ test('registering and instantiating the Pi provider does not eagerly load the Pi
   clearRegistry();
   registerCommunityProviders();
 
+  process.env.HK47_ALLOW_PROVIDERS = 'pi'; // HK-47 fork refuses non-claude by default
   const provider = getAgentProvider('pi');
   expect(provider.getType()).toBe('pi');
   expect(provider.getCapabilities()).toBeDefined();

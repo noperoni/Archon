@@ -127,6 +127,20 @@ function assertMountableSource(sourceMount: string, workspacePath: string): void
   }
 }
 
+/**
+ * HK-47 fork (PERS-15 gap 3): an in-container Claude skips the user's settings,
+ * so its hooks, the danger gate among them, never load. Refused unless
+ * HK47_ALLOW_CONTAINER=1.
+ */
+function assertContainerAllowed(): void {
+  if (process.env.HK47_ALLOW_CONTAINER !== '1') {
+    throw new Error(
+      'Container isolation is refused by the HK-47 fork: Claude in a container runs without ' +
+        'the danger gate. Set HK47_ALLOW_CONTAINER=1 to allow it anyway.'
+    );
+  }
+}
+
 export class ContainerBackend implements IIsolationBackend {
   readonly id = 'container' as const;
 
@@ -150,6 +164,7 @@ export class ContainerBackend implements IIsolationBackend {
    * created; if the container never signals ready, it is removed before throwing.
    */
   async prepare(req: BackendPrepareRequest): Promise<PreparedEnv> {
+    assertContainerAllowed();
     const hostRoot = req.codebase.defaultCwd;
     const { image } = this.config;
     const sourceMount = req.sourceMount;
@@ -347,6 +362,7 @@ export class ContainerBackend implements IIsolationBackend {
    *    restart from an empty overlay.
    */
   async resumeEnv(envId: string): Promise<PreparedEnv> {
+    assertContainerAllowed();
     const meta = await this.loadMetadata(envId);
     const { containerName, volume, workspacePath } = meta;
     if (!containerName || !volume || !workspacePath) {
