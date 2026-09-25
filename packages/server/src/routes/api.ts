@@ -10,6 +10,7 @@ import { boundMetadataToolOutputs } from '../adapters/web/truncate';
 import { rm, readFile, writeFile, unlink, mkdir, readdir, stat } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { normalize, join, sep, basename, dirname, resolve } from 'path';
+import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import type { Context } from 'hono';
 import type {
@@ -2663,7 +2664,26 @@ export function registerApiRoutes(
     };
   }
 
-  function toApiCodebase(row: import('@archon/core').Codebase): ApiCodebase {
+  // HK-47 fork: the two Claude accounts, told apart by config dir name.
+  const ACCOUNT_CONFIG_DIRS = { personal: '.claude-personal', work: '.claude-work' } as const;
+  type ClaudeAccount = keyof typeof ACCOUNT_CONFIG_DIRS;
+
+  /**
+   * The account a codebase's runs use: its own CLAUDE_CONFIG_DIR env var, else
+   * the server's, which is the same precedence buildRequestSubprocessEnv applies.
+   */
+  function accountOf(codebaseConfigDir: string | undefined): ClaudeAccount | null {
+    const dir = basename(codebaseConfigDir ?? process.env.CLAUDE_CONFIG_DIR ?? '');
+    for (const [account, name] of Object.entries(ACCOUNT_CONFIG_DIRS)) {
+      if (dir === name) return account as ClaudeAccount;
+    }
+    return null;
+  }
+
+  function toApiCodebase(
+    row: import('@archon/core').Codebase,
+    codebaseConfigDir: string | undefined
+  ): ApiCodebase {
     let commands = row.commands;
     if (typeof commands === 'string') {
       try {
@@ -2680,7 +2700,16 @@ export function registerApiRoutes(
       commands,
       created_at: toISOString(row.created_at),
       updated_at: toISOString(row.updated_at),
+      account: accountOf(codebaseConfigDir),
     };
+  }
+
+  /** Serialize one codebase, reading its CLAUDE_CONFIG_DIR for the account. */
+  async function toApiCodebaseWithAccount(
+    row: import('@archon/core').Codebase
+  ): Promise<ApiCodebase> {
+    const env = await envVarDb.getCodebaseEnvVars(row.id);
+    return toApiCodebase(row, env.CLAUDE_CONFIG_DIR);
   }
 
   function toApiMessage(row: MessageRow): ApiMessage {
@@ -3140,7 +3169,8 @@ export function registerApiRoutes(
       deduped.push(...seen.values());
       deduped.sort((a, b) => a.name.localeCompare(b.name));
 
-      return c.json(deduped.map(toApiCodebase));
+      const configDirs = await envVarDb.getEnvVarAcrossCodebases('CLAUDE_CONFIG_DIR');
+      return c.json(deduped.map(cb => toApiCodebase(cb, configDirs.get(cb.id))));
     } catch (error) {
       getLog().error({ err: error }, 'list_codebases_failed');
       return apiError(c, 500, 'Failed to list codebases');
@@ -3154,7 +3184,7 @@ export function registerApiRoutes(
       if (!codebase) {
         return apiError(c, 404, 'Codebase not found');
       }
-      return c.json(toApiCodebase(codebase));
+      return c.json(await toApiCodebaseWithAccount(codebase));
     } catch (error) {
       getLog().error({ err: error }, 'get_codebase_failed');
       return apiError(c, 500, 'Failed to get codebase');
@@ -3205,7 +3235,17 @@ export function registerApiRoutes(
         return apiError(c, 500, 'Codebase created but not found');
       }
 
-      return c.json(toApiCodebase(codebase), result.alreadyExisted ? 200 : 201);
+      // Binding is explicit even for the server's default account, so a
+      // change of default can never silently move an existing project.
+      if (body.account) {
+        await envVarDb.setCodebaseEnvVar(
+          codebase.id,
+          'CLAUDE_CONFIG_DIR',
+          join(homedir(), ACCOUNT_CONFIG_DIRS[body.account])
+        );
+      }
+
+      return c.json(await toApiCodebaseWithAccount(codebase), result.alreadyExisted ? 200 : 201);
     } catch (error) {
       getLog().error({ err: error }, 'add_codebase_failed');
       return apiError(

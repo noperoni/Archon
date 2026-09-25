@@ -92,6 +92,8 @@ function EnvVarsBody({ projectId, projectName, onClose }: BodyProps): ReactEleme
 
   const refresh = (): void => {
     invalidate(K.envVars(projectId));
+    // CLAUDE_CONFIG_DIR decides the project's account, which the rail groups by.
+    invalidate(K.projects);
   };
 
   const upsert = async (e: FormEvent): Promise<void> => {

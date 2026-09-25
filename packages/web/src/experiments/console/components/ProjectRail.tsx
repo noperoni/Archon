@@ -6,7 +6,7 @@ import { EnvVarsDialog } from './EnvVarsDialog';
 import { useEntity, invalidate } from '../store/cache';
 import { K } from '../store/keys';
 import * as skill from '../skills';
-import type { Project } from '../primitives/project';
+import type { Account, Project } from '../primitives/project';
 
 interface ProjectRailProps {
   onAddProject: () => void;
@@ -23,10 +23,32 @@ function extractProjectId(pathname: string): string | null {
   return m === null ? null : m[1];
 }
 
-/** Owner = the part of `owner/repo` before the first slash; bare names group under themselves. */
-function ownerOf(name: string): string {
-  const idx = name.indexOf('/');
-  return idx === -1 ? name : name.slice(0, idx);
+type SectionKey = Account | 'other';
+
+/** Rail sections in display order. 'other' only renders when a project lands in it. */
+const SECTIONS: readonly { key: SectionKey; label: string }[] = [
+  { key: 'personal', label: 'Personal' },
+  { key: 'work', label: 'Work' },
+  { key: 'other', label: 'Other account' },
+];
+
+const COLLAPSED_KEY = 'archon.console.railCollapsed';
+
+function readCollapsed(): Set<SectionKey> {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
+    return new Set(Array.isArray(v) ? (v as SectionKey[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCollapsed(c: Set<SectionKey>): void {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...c]));
+  } catch {
+    /* ignore */
+  }
 }
 
 const RAIL_WIDTH_KEY = 'archon.console.railWidth';
@@ -84,8 +106,9 @@ function RailNavLink({
 
 /**
  * Left rail, design v2: header with count pill, filter input, projects
- * grouped by owner with hairline section labels, and a drag handle on the
- * right edge (232–440px, persisted).
+ * grouped into collapsible Personal / Work sections by the Claude account
+ * their runs use (so the rail and the run can never disagree), and a drag
+ * handle on the right edge (232–440px, persisted).
  *
  * Note: ProjectRail mounts outside the inner `<Routes>` (sibling to the
  * <main> that hosts them), so `useParams()` returns `{}` here even on a
@@ -98,6 +121,7 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
   const [envProject, setEnvProject] = useState<Project | null>(null);
   const [query, setQuery] = useState('');
   const [width, setWidth] = useState<number>(readRailWidth);
+  const [collapsed, setCollapsed] = useState<Set<SectionKey>>(readCollapsed);
   const [resizing, setResizing] = useState(false);
   const widthRef = useRef(width);
   widthRef.current = width;
@@ -113,21 +137,26 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
     return list.filter(p => `${p.name} ${p.path}`.toLowerCase().includes(q));
   }, [projects, query]);
 
-  const groups = useMemo(() => {
-    const out: { owner: string; items: Project[] }[] = [];
-    const seen = new Map<string, { owner: string; items: Project[] }>();
-    for (const p of filtered) {
-      const owner = ownerOf(p.name);
-      let g = seen.get(owner);
-      if (g === undefined) {
-        g = { owner, items: [] };
-        seen.set(owner, g);
-        out.push(g);
-      }
-      g.items.push(p);
-    }
-    return out;
-  }, [filtered]);
+  const groups = useMemo(
+    () =>
+      SECTIONS.map(sec => ({
+        ...sec,
+        items: filtered.filter(p => (p.account ?? 'other') === sec.key),
+      })).filter(g => g.key !== 'other' || g.items.length > 0),
+    [filtered]
+  );
+
+  const toggleSection = (key: SectionKey): void => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      writeCollapsed(next);
+      return next;
+    });
+  };
+
+  // A filter searches inside collapsed sections too, or its hits would hide.
+  const filtering = query.trim().length > 0;
 
   // Pointer-driven resize; width clamps to [RAIL_MIN, RAIL_MAX] and persists
   // on release. Pointer capture keeps the drag alive outside the handle.
@@ -252,34 +281,51 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
             {error.message}
           </span>
         ) : null}
-        {groups.map(g => (
-          <div key={g.owner} className="mb-2">
-            <div className="flex items-center gap-2 px-2 pb-1 pt-2">
-              <span className="max-w-[70%] truncate font-mono text-[10.5px] font-semibold tracking-[0.05em] text-text-tertiary">
-                {g.owner}
-              </span>
-              <span aria-hidden className="h-px flex-1 bg-border/60" />
-            </div>
-            {g.items.map(p => (
-              <ProjectRow
-                key={p.id}
-                project={p}
-                selected={scope === p.id}
+        {groups.map(g => {
+          const open = filtering || !collapsed.has(g.key);
+          return (
+            <div key={g.key} className="mb-2">
+              <button
+                type="button"
                 onClick={() => {
-                  navigate(`/console/p/${p.id}`);
+                  toggleSection(g.key);
                 }}
-                onRemove={() => {
-                  void handleRemove(p.id);
-                  if (scope === p.id) navigate('/console');
-                }}
-                onEditEnv={() => {
-                  setEnvProject(p);
-                }}
-              />
-            ))}
-          </div>
-        ))}
-        {groups.length === 0 && error === undefined ? (
+                aria-expanded={open}
+                title={open ? `Collapse ${g.label}` : `Expand ${g.label}`}
+                className="flex w-full items-center gap-2 rounded-md px-2 pb-1 pt-2 text-left text-text-tertiary transition-colors hover:text-text-secondary"
+              >
+                <span aria-hidden className="font-mono text-[10.5px] font-semibold">
+                  {open ? '[-]' : '[+]'}
+                </span>
+                <span className="truncate font-mono text-[10.5px] font-semibold uppercase tracking-[0.1em]">
+                  {g.label}
+                </span>
+                <span className="font-mono text-[10px]">{g.items.length}</span>
+                <span aria-hidden className="h-px flex-1 bg-border/60" />
+              </button>
+              {open
+                ? g.items.map(p => (
+                    <ProjectRow
+                      key={p.id}
+                      project={p}
+                      selected={scope === p.id}
+                      onClick={() => {
+                        navigate(`/console/p/${p.id}`);
+                      }}
+                      onRemove={() => {
+                        void handleRemove(p.id);
+                        if (scope === p.id) navigate('/console');
+                      }}
+                      onEditEnv={() => {
+                        setEnvProject(p);
+                      }}
+                    />
+                  ))
+                : null}
+            </div>
+          );
+        })}
+        {filtered.length === 0 && error === undefined ? (
           <div className="px-3 py-6 text-center text-[12.5px] text-text-tertiary">
             No projects match “{query}”.
           </div>

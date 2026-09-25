@@ -1,5 +1,5 @@
 import { requestJson } from '../lib/http';
-import { toProject, type Project } from '../primitives/project';
+import { toProject, type Account, type Project } from '../primitives/project';
 
 export async function listProjects(): Promise<Project[]> {
   const raw = await requestJson<Parameters<typeof toProject>[0][]>('/api/codebases');
@@ -13,18 +13,18 @@ export async function getProject(id: string): Promise<Project> {
   return toProject(raw);
 }
 
-export async function addProjectByUrl(url: string): Promise<Project> {
+export async function addProjectByUrl(url: string, account: Account): Promise<Project> {
   const raw = await requestJson<Parameters<typeof toProject>[0]>('/api/codebases', {
     method: 'POST',
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, account }),
   });
   return toProject(raw);
 }
 
-export async function addProjectByPath(path: string): Promise<Project> {
+export async function addProjectByPath(path: string, account: Account): Promise<Project> {
   const raw = await requestJson<Parameters<typeof toProject>[0]>('/api/codebases', {
     method: 'POST',
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, account }),
   });
   return toProject(raw);
 }

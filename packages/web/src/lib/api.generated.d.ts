@@ -3507,10 +3507,14 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      account: components['schemas']['ClaudeAccount'];
     };
+    /** @enum {string|null} */
+    ClaudeAccount: 'personal' | 'work' | null;
     AddCodebaseBody: {
       url?: string;
       path?: string;
+      account?: components['schemas']['ClaudeAccount'];
     };
     DeleteCodebaseResponse: {
       success: boolean;

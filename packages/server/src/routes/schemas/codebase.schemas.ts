@@ -4,11 +4,16 @@
 import { z } from '@hono/zod-openapi';
 import { codebaseRowSchema } from '@archon/core/schemas/codebase';
 
+/** The Claude account a codebase runs under, read from its effective CLAUDE_CONFIG_DIR. */
+export const claudeAccountSchema = z.enum(['personal', 'work']).openapi('ClaudeAccount');
+
 /** A codebase record (wire shape with ISO string dates). */
 export const codebaseSchema = codebaseRowSchema
   .extend({
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
+    /** null when the effective config dir is neither account's. */
+    account: claudeAccountSchema.nullable(),
   })
   .openapi('Codebase');
 
@@ -23,6 +28,8 @@ export const addCodebaseBodySchema = z
   .object({
     url: z.string().min(1).optional(),
     path: z.string().min(1).optional(),
+    /** Binds the codebase to an account by writing its CLAUDE_CONFIG_DIR env var. */
+    account: claudeAccountSchema.optional(),
   })
   .refine(b => (b.url !== undefined) !== (b.path !== undefined), {
     message: 'Provide either "url" or "path", not both and not neither',

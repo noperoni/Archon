@@ -22,6 +22,15 @@ export async function getCodebaseEnvVars(codebaseId: string): Promise<Record<str
   return Object.fromEntries(result.rows.map(r => [r.key, r.value]));
 }
 
+/** One key's value across every codebase that sets it, keyed by codebase id. */
+export async function getEnvVarAcrossCodebases(key: string): Promise<Map<string, string>> {
+  const result = await pool.query<{ codebase_id: string; value: string }>(
+    'SELECT codebase_id, value FROM remote_agent_codebase_env_vars WHERE key = $1',
+    [key]
+  );
+  return new Map(result.rows.map(r => [r.codebase_id, r.value]));
+}
+
 /** Upsert a single env var (INSERT or UPDATE on conflict). */
 export async function setCodebaseEnvVar(
   codebaseId: string,

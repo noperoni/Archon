@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import * as skill from '../skills';
-import type { Project } from '../primitives/project';
+import type { Account, Project } from '../primitives/project';
 
 interface AddProjectDialogProps {
   open: boolean;
@@ -74,6 +74,9 @@ export function AddProjectDialog({
   onAdded,
 }: AddProjectDialogProps): ReactElement | null {
   const [mode, setMode] = useState<Mode>('url');
+  // No default: the account decides which Claude login, skills and memory the
+  // project's runs use, so it is always chosen, never assumed.
+  const [account, setAccount] = useState<Account | null>(null);
   const [value, setValue] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,14 +99,16 @@ export function AddProjectDialog({
 
   const onSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
+    if (account === null) return;
     setError(null);
     setSubmitting(true);
     try {
       const project = isGit
-        ? await skill.addProjectByUrl(value.trim())
-        : await skill.addProjectByPath(value.trim());
+        ? await skill.addProjectByUrl(value.trim(), account)
+        : await skill.addProjectByPath(value.trim(), account);
       onAdded(project);
       setValue('');
+      setAccount(null);
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -190,6 +195,37 @@ export function AddProjectDialog({
           ))}
         </div>
 
+        {/* Account: which ~/.claude-* the project's runs use */}
+        <label className="mb-[9px] block font-mono text-[11px] font-semibold uppercase tracking-[0.09em] text-text-tertiary">
+          Account
+        </label>
+        <div
+          role="radiogroup"
+          aria-label="Account"
+          className="mb-5 grid grid-cols-2 gap-1 rounded-[11px] border bg-surface p-1"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          {(['personal', 'work'] as const).map(a => (
+            <button
+              key={a}
+              type="button"
+              role="radio"
+              aria-checked={account === a}
+              onClick={() => {
+                setAccount(a);
+              }}
+              className={`rounded-lg border px-3 py-[9px] text-[13px] font-semibold transition-colors ${
+                account === a
+                  ? 'bg-surface-hover text-text-primary'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+              style={{ borderColor: account === a ? 'var(--border-bright)' : 'transparent' }}
+            >
+              {a === 'personal' ? 'Personal' : 'Work'}
+            </button>
+          ))}
+        </div>
+
         {/* Field */}
         <label className="mb-[9px] block font-mono text-[11px] font-semibold uppercase tracking-[0.09em] text-text-tertiary">
           {isGit ? 'Repository URL' : 'Local folder path'}
@@ -255,7 +291,7 @@ export function AddProjectDialog({
           </button>
           <button
             type="submit"
-            disabled={submitting || value.trim().length === 0}
+            disabled={submitting || value.trim().length === 0 || account === null}
             className="brand-bar inline-flex items-center gap-[7px] rounded-[10px] px-[18px] py-2.5 text-[13px] font-bold text-white shadow-[0_8px_22px_-10px_color-mix(in_oklch,var(--brand-magenta),transparent_20%)] transition-all hover:-translate-y-px hover:brightness-110 disabled:translate-y-0 disabled:opacity-45 disabled:shadow-none"
           >
             <span aria-hidden className="text-[14px] leading-none">
