@@ -1009,6 +1009,96 @@ export interface paths {
     };
     trace?: never;
   };
+  '/api/conversations/{id}/questions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List AskUserQuestion calls waiting on an answer in this conversation */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Pending questions, oldest first */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['PendingQuestionList'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/conversations/{id}/questions/{toolUseId}/answer': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Answer a pending AskUserQuestion in a running turn */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          toolUseId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['QuestionAnswerBody'];
+        };
+      };
+      responses: {
+        /** @description Answered; the turn resumes */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['SuccessResponse'];
+          };
+        };
+        /** @description No question pending under that id in this conversation */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/conversations/{id}/messages': {
     parameters: {
       query?: never;
@@ -3362,6 +3452,24 @@ export interface components {
     };
     UpdateConversationBody: {
       title?: string;
+    };
+    PendingQuestionList: {
+      toolUseId: string;
+      input: {
+        [key: string]: unknown;
+      };
+    }[];
+    QuestionAnswerBody: {
+      answers: {
+        [key: string]: string;
+      };
+      annotations?: {
+        [key: string]: {
+          notes?: string;
+          preview?: string;
+        };
+      };
+      response?: string;
     };
     MessageListResponse: components['schemas']['Message'][];
     Message: {

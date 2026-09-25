@@ -96,6 +96,7 @@ import { reportUnpushedWorkInSource } from './post-message-reminder';
 import * as messageDb from '../db/messages';
 import * as workflowDb from '../db/workflows';
 import { getCodebaseEnvVars } from '../db/env-vars';
+import { waitForAnswer } from '../services/pending-questions';
 import {
   buildAiProfile,
   isLiteralSpec,
@@ -2504,6 +2505,12 @@ export async function handleMessage(
     };
     if (chatRequest.preset) {
       applyPresetToRequestOptions(providerKey, chatRequest.preset, requestOptions);
+    }
+    // Only the web UI can render a question and post the answer back; other
+    // platforms keep the CLI's default of not offering AskUserQuestion at all.
+    if (platform.getPlatformType() === 'web') {
+      requestOptions.onUserQuestion = (question): ReturnType<typeof waitForAnswer> =>
+        waitForAnswer(conversationId, question);
     }
 
     if (!conversation.title && !trimmedMessage.startsWith('/')) {

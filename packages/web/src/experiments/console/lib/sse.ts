@@ -109,6 +109,8 @@ export function useRunStreamSSE(conversationPlatformId: string | null, runId: st
         flushTimer = null;
         if (messagesDirty) {
           invalidate(K.messages(conversationPlatformId));
+          // A tool call may be an AskUserQuestion now parked on the server.
+          invalidate(K.questions(conversationPlatformId));
           messagesDirty = false;
         }
         if (runDirty) {
@@ -189,6 +191,8 @@ export function useConversationSSE(
         flushTimer = null;
         if (messagesDirty) {
           invalidate(K.messages(conversationPlatformId));
+          // A tool call may be an AskUserQuestion now parked on the server.
+          invalidate(K.questions(conversationPlatformId));
           messagesDirty = false;
         }
       }, 100);

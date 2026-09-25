@@ -31,6 +31,7 @@
 import {
   query,
   type Options,
+  type CanUseTool,
   type HookCallback,
   type HookCallbackMatcher,
   type SDKAssistantMessageError,
@@ -44,6 +45,7 @@ import type {
   TokenUsage,
   ProviderCapabilities,
   NodeConfig,
+  AgentRequestOptions,
 } from '../types';
 import { parseClaudeConfig } from './config';
 import { CLAUDE_CAPABILITIES } from './capabilities';
@@ -849,6 +851,11 @@ function buildBaseClaudeOptions(
     // async hooks, which Archon does not register today.
     includeHookEvents: true,
     hooks: buildToolCaptureHooks(toolResultQueue),
+    // Container runs have no host UI to answer from, so they keep the old
+    // behaviour: no prompt surface, and the CLI never loads AskUserQuestion.
+    ...(requestOptions?.onUserQuestion !== undefined && containerExecContext === undefined
+      ? { canUseTool: buildUserQuestionPrompt(requestOptions.onUserQuestion) }
+      : {}),
     stderr: (data: string): void => {
       const output = data.trim();
       if (!output) return;
@@ -871,6 +878,42 @@ function buildBaseClaudeOptions(
         getLog().error({ stderr: output }, 'subprocess_error');
       }
     },
+  };
+}
+
+// ─── User Question Prompt ────────────────────────────────────────────────
+
+/**
+ * The prompt surface behind AskUserQuestion. Registering it is what makes the
+ * CLI load the tool, and under bypassPermissions only tools that require a
+ * human still reach it (measured, PERS-16 spike, CLI 2.1.280).
+ *
+ * Everything else that lands here was an `ask` from some hook: the HK-47 danger
+ * gate's own failure path, for one. There is no human dialog for those, so they
+ * are denied with the hook's reason: allowing would switch the gate off.
+ */
+export function buildUserQuestionPrompt(
+  onUserQuestion: NonNullable<AgentRequestOptions['onUserQuestion']>
+): CanUseTool {
+  return async (toolName, input, ctx) => {
+    if (toolName !== 'AskUserQuestion') {
+      return {
+        behavior: 'deny',
+        message: ctx.decisionReason
+          ? `Permission required and no dialog exists for ${toolName}: ${ctx.decisionReason}`
+          : `Permission required and no dialog exists for ${toolName}.`,
+      };
+    }
+    let answer: Awaited<ReturnType<typeof onUserQuestion>> = null;
+    try {
+      answer = await onUserQuestion({ toolUseId: ctx.toolUseID, input, signal: ctx.signal });
+    } catch (err) {
+      getLog().warn({ err, toolUseId: ctx.toolUseID }, 'claude.user_question_failed');
+    }
+    if (answer === null) {
+      return { behavior: 'deny', message: 'The question was dismissed without an answer.' };
+    }
+    return { behavior: 'allow', updatedInput: { ...input, ...answer } };
   };
 }
 

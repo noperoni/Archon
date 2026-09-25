@@ -74,6 +74,32 @@ export const listMessagesQuerySchema = z.object({
 /** GET /api/conversations/:id/messages response. */
 export const messageListResponseSchema = z.array(messageSchema).openapi('MessageListResponse');
 
+/** Path params for POST /api/conversations/:id/questions/:toolUseId/answer. */
+export const questionAnswerParamsSchema = z.object({ id: z.string(), toolUseId: z.string() });
+
+/**
+ * An answer to a pending AskUserQuestion: question text to chosen label, with
+ * multi-select labels joined by ", " as Claude Code expects.
+ */
+export const questionAnswerBodySchema = z
+  .object({
+    answers: z.record(z.string(), z.string()),
+    annotations: z
+      .record(
+        z.string(),
+        z.object({ notes: z.string().optional(), preview: z.string().optional() })
+      )
+      .optional(),
+    response: z.string().optional(),
+  })
+  .strict()
+  .openapi('QuestionAnswerBody');
+
+/** GET /api/conversations/:id/questions response. */
+export const pendingQuestionListSchema = z
+  .array(z.object({ toolUseId: z.string(), input: z.record(z.string(), z.unknown()) }))
+  .openapi('PendingQuestionList');
+
 /** POST /api/conversations/:id/message JSON request body. */
 export const sendMessageBodySchema = z
   .object({ message: z.string().min(1) })

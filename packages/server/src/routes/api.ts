@@ -313,7 +313,11 @@ import {
   messageListResponseSchema,
   listMessagesQuerySchema,
   dispatchResponseSchema,
+  questionAnswerParamsSchema,
+  questionAnswerBodySchema,
+  pendingQuestionListSchema,
 } from './schemas/conversation.schemas';
+import { answerQuestion, listQuestions } from '@archon/core/services/pending-questions';
 import {
   codebaseListResponseSchema,
   codebaseSchema,
@@ -709,6 +713,38 @@ const sendMessageRoute = createRoute({
     },
     400: jsonError('Bad request'),
     500: jsonError('Server error'),
+  },
+});
+
+const listQuestionsRoute = createRoute({
+  method: 'get',
+  path: '/api/conversations/{id}/questions',
+  tags: ['Conversations'],
+  summary: 'List AskUserQuestion calls waiting on an answer in this conversation',
+  request: { params: conversationIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: pendingQuestionListSchema } },
+      description: 'Pending questions, oldest first',
+    },
+  },
+});
+
+const answerQuestionRoute = createRoute({
+  method: 'post',
+  path: '/api/conversations/{id}/questions/{toolUseId}/answer',
+  tags: ['Conversations'],
+  summary: 'Answer a pending AskUserQuestion in a running turn',
+  request: {
+    params: questionAnswerParamsSchema,
+    body: { content: { 'application/json': { schema: questionAnswerBodySchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: successResponseSchema } },
+      description: 'Answered; the turn resumes',
+    },
+    404: jsonError('No question pending under that id in this conversation'),
   },
 });
 
@@ -2847,6 +2883,20 @@ export function registerApiRoutes(
       getLog().error({ err: error }, 'delete_conversation_failed');
       return apiError(c, 500, 'Failed to delete conversation');
     }
+  });
+
+  // GET /api/conversations/:id/questions - Parked AskUserQuestion calls
+  registerOpenApiRoute(listQuestionsRoute, c => c.json(listQuestions(c.req.param('id') ?? '')));
+
+  // POST /api/conversations/:id/questions/:toolUseId/answer - Settle a parked AskUserQuestion
+  registerOpenApiRoute(answerQuestionRoute, async c => {
+    const conversationId = c.req.param('id') ?? '';
+    const toolUseId = c.req.param('toolUseId') ?? '';
+    const answer = getValidatedBody(c, questionAnswerBodySchema);
+    if (!answerQuestion(conversationId, toolUseId, answer)) {
+      return apiError(c, 404, 'No question pending under that id in this conversation');
+    }
+    return c.json({ success: true });
   });
 
   // GET /api/conversations/:id/messages - Message history

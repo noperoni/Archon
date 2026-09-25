@@ -5,6 +5,7 @@ import { ChatComposer } from '../components/ChatComposer';
 import { ProjectViewTabs } from '../components/ProjectViewTabs';
 import { WorkingIndicator } from '../components/WorkingIndicator';
 import { WorkflowDock } from '../components/WorkflowDock';
+import { QuestionCard } from '../components/QuestionCard';
 import { EmptyState } from '../components/EmptyState';
 import { StreamContextProvider } from '../lib/stream-context';
 import { useConversationSSE } from '../lib/sse';
@@ -13,6 +14,7 @@ import { K } from '../store/keys';
 import * as skill from '../skills';
 import type { Project } from '../primitives/project';
 import type { Message } from '../primitives/message';
+import type { PendingQuestion } from '../skills/messages';
 import type { ConversationSummary } from '../primitives/conversation';
 
 // While a turn is active, refetch messages on this cadence so streamed replies
@@ -64,6 +66,11 @@ export function ChatPage(): ReactElement {
   const { data: messages, error: messagesError } = useEntity<Message[]>(
     activeConvId !== null ? K.messages(activeConvId) : 'noop:no-conv',
     () => (activeConvId !== null ? skill.listMessages(activeConvId) : Promise.resolve([]))
+  );
+
+  const { data: questions } = useEntity<PendingQuestion[]>(
+    activeConvId !== null ? K.questions(activeConvId) : 'noop:no-conv-questions',
+    () => (activeConvId !== null ? skill.listQuestions(activeConvId) : Promise.resolve([]))
   );
 
   // `busy` = a reply is pending → composer disabled + recovery poll active.
@@ -142,6 +149,7 @@ export function ChatPage(): ReactElement {
         return;
       }
       invalidate(K.messages(activeConvId));
+      invalidate(K.questions(activeConvId));
     }, ACTIVE_POLL_MS);
     return (): void => {
       clearInterval(id);
@@ -296,6 +304,22 @@ export function ChatPage(): ReactElement {
           </button>
         ) : null}
       </div>
+
+      {activeConvId !== null && (questions ?? []).length > 0 ? (
+        <div className="mx-auto w-full max-w-[940px] shrink-0 px-[30px] pb-2">
+          {(questions ?? []).map(q => (
+            <QuestionCard
+              key={q.toolUseId}
+              pending={q}
+              onAnswer={async (answers): Promise<void> => {
+                await skill.answerQuestion(activeConvId, q.toolUseId, answers);
+                invalidate(K.questions(activeConvId));
+                invalidate(K.messages(activeConvId));
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
 
       <WorkflowDock projectId={projectId} />
 

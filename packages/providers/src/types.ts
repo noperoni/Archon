@@ -518,6 +518,31 @@ export interface AgentRequestOptions {
    * `nativeTools` capability.
    */
   nativeTools?: NativeTool[];
+  /**
+   * Answers the model's AskUserQuestion call from a human in the host UI.
+   * Resolves with the answer fields to merge into the tool input, or null when
+   * the question is dismissed or the turn aborts. Absent means the tool is not
+   * offered at all (the Claude CLI only loads it when a prompt surface exists).
+   */
+  onUserQuestion?: (question: UserQuestion) => Promise<UserQuestionAnswer | null>;
+}
+
+/** An AskUserQuestion call waiting on a human. */
+export interface UserQuestion {
+  toolUseId: string;
+  input: Record<string, unknown>;
+  signal: AbortSignal;
+}
+
+/**
+ * The fields Claude Code's AskUserQuestion reads back from its input: question
+ * text to chosen label (multi-select joined with ", "), plus optional notes and
+ * free text. PostToolUse hooks see them as `tool_input.answers`.
+ */
+export interface UserQuestionAnswer {
+  answers: Record<string, string>;
+  annotations?: Record<string, { notes?: string; preview?: string }>;
+  response?: string;
 }
 
 /**
