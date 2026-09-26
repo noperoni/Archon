@@ -97,7 +97,14 @@ export const questionAnswerBodySchema = z
 
 /** GET /api/conversations/:id/questions response. */
 export const pendingQuestionListSchema = z
-  .array(z.object({ toolUseId: z.string(), input: z.record(z.string(), z.unknown()) }))
+  .array(
+    z.object({
+      toolUseId: z.string(),
+      input: z.record(z.string(), z.unknown()),
+      /** Asked by a workflow run this conversation launched. */
+      fromRun: z.boolean(),
+    })
+  )
   .openapi('PendingQuestionList');
 
 /** POST /api/conversations/:id/message JSON request body. */

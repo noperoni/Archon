@@ -32,4 +32,19 @@ describe('pending questions', () => {
     expect(await waiting).toBeNull();
     expect(answerQuestion('conv-a', 't3', { answers: {} })).toBe(false);
   });
+
+  test('a run question shows in the launching chat, which may answer it', async () => {
+    const waiting = waitForAnswer('worker-1', ask('t4'), 'chat-1');
+    expect(listQuestions('worker-1')).toEqual([
+      { toolUseId: 't4', input: { questions: [] }, fromRun: false },
+    ]);
+    expect(listQuestions('chat-1')).toEqual([
+      { toolUseId: 't4', input: { questions: [] }, fromRun: true },
+    ]);
+    expect(listQuestions('chat-2')).toEqual([]);
+    expect(answerQuestion('chat-2', 't4', { answers: {} })).toBe(false);
+    expect(answerQuestion('chat-1', 't4', { answers: { Q: 'A' } })).toBe(true);
+    expect(await waiting).toEqual({ answers: { Q: 'A' } });
+    expect(listQuestions('worker-1')).toEqual([]);
+  });
 });

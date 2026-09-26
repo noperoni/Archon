@@ -175,6 +175,13 @@ export interface WorkflowDeps {
    */
   isPerUserGitHubEnabled?: () => boolean;
   /**
+   * HK-47 fork. Optional: answers a node's AskUserQuestion from a human, bound
+   * to the run's conversation by the dispatcher. Set only where a UI can render
+   * the question and post the answer back (web dispatch); absent, nodes are
+   * never offered the tool, which is the CLI's own default.
+   */
+  onUserQuestion?: SendQueryOptions['onUserQuestion'];
+  /**
    * Optional: whether per-user AI-provider credentials are active for this
    * install (TOKEN_ENCRYPTION_KEY set; independent of the GitHub App). When
    * false/absent, no per-user provider env is injected and chats/runs keep

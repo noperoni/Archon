@@ -15,6 +15,7 @@ import { RunActionBar } from '../components/RunActionBar';
 import { StreamToolbar, type DetailView } from '../components/StreamToolbar';
 import { ApprovalContext } from '../components/ApprovalContext';
 import { ApprovalPanel } from '../components/ApprovalPanel';
+import { QuestionCard } from '../components/QuestionCard';
 import { RunGraphPanel } from '../components/RunGraphPanel';
 import { ArtifactPanel } from '../components/ArtifactPanel';
 import { RunStartedLine, RunFinishedLine } from '../components/RunLifecycle';
@@ -28,6 +29,7 @@ import { foldNodeRuns, type RunEvent } from '../primitives/event';
 import type { Message } from '../primitives/message';
 import type { Project } from '../primitives/project';
 import type { ArtifactFile } from '../skills/runs';
+import { QUESTION_POLL_MS, type PendingQuestion } from '../skills/messages';
 
 interface RunDetailView {
   run: Run;
@@ -201,6 +203,28 @@ export function RunDetailPage(): ReactElement {
       clearInterval(id);
     };
   }, [runId, status, conversationPlatformId]);
+
+  // A node's AskUserQuestion, parked under the worker conversation. The node
+  // streams nothing while it waits, so no SSE event would ever reveal it.
+  const { data: questions } = useEntity<PendingQuestion[]>(
+    conversationPlatformId !== null
+      ? K.questions(conversationPlatformId)
+      : 'noop:no-conversation-questions',
+    () =>
+      conversationPlatformId !== null
+        ? skill.listQuestions(conversationPlatformId)
+        : Promise.resolve([])
+  );
+  useEffect(() => {
+    if (conversationPlatformId === null) return;
+    if (status !== 'running' && status !== 'paused') return;
+    const id = setInterval(() => {
+      invalidate(K.questions(conversationPlatformId));
+    }, QUESTION_POLL_MS);
+    return (): void => {
+      clearInterval(id);
+    };
+  }, [status, conversationPlatformId]);
 
   // Surface the artifact count on the tab even when the user hasn't visited
   // the panel yet. Cheap call — the server walks one directory. Must live
@@ -477,6 +501,23 @@ export function RunDetailPage(): ReactElement {
                     </div>
 
                     <RunFinishedLine run={run} />
+
+                    {conversationPlatformId !== null
+                      ? (questions ?? []).map(q => (
+                          <QuestionCard
+                            key={q.toolUseId}
+                            pending={q}
+                            onAnswer={async (answers): Promise<void> => {
+                              await skill.answerQuestion(
+                                conversationPlatformId,
+                                q.toolUseId,
+                                answers
+                              );
+                              invalidate(K.questions(conversationPlatformId));
+                            }}
+                          />
+                        ))
+                      : null}
 
                     {run.status === 'paused' &&
                     run.approval !== null &&

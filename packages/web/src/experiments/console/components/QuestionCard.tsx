@@ -102,7 +102,9 @@ export function QuestionCard({ pending, onAnswer }: QuestionCardProps): ReactEle
   return (
     <div className="mt-2 rounded border border-warning/30 bg-warning/[0.06] p-3">
       <p className="mb-3 text-[12px] uppercase tracking-[0.12em] text-warning">
-        The agent is waiting on your answer
+        {pending.fromRun
+          ? 'A workflow run is waiting on your answer'
+          : 'The agent is waiting on your answer'}
       </p>
       <div className="flex flex-col gap-4">
         {questions.map(q => {

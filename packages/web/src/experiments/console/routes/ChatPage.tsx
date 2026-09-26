@@ -14,7 +14,7 @@ import { K } from '../store/keys';
 import * as skill from '../skills';
 import type { Project } from '../primitives/project';
 import type { Message } from '../primitives/message';
-import type { PendingQuestion } from '../skills/messages';
+import { QUESTION_POLL_MS, type PendingQuestion } from '../skills/messages';
 import type { ConversationSummary } from '../primitives/conversation';
 
 // While a turn is active, refetch messages on this cadence so streamed replies
@@ -72,6 +72,20 @@ export function ChatPage(): ReactElement {
     activeConvId !== null ? K.questions(activeConvId) : 'noop:no-conv-questions',
     () => (activeConvId !== null ? skill.listQuestions(activeConvId) : Promise.resolve([]))
   );
+
+  // A workflow run launched from this chat can ask while the chat itself is
+  // idle, and no turn of ours is polling then, so questions get their own poll.
+  // ponytail: a fixed 5s poll of an in-memory endpoint; push it over SSE if the
+  // console ever grows many open chats.
+  useEffect(() => {
+    if (activeConvId === null) return;
+    const id = setInterval(() => {
+      invalidate(K.questions(activeConvId));
+    }, QUESTION_POLL_MS);
+    return (): void => {
+      clearInterval(id);
+    };
+  }, [activeConvId]);
 
   // `busy` = a reply is pending → composer disabled + recovery poll active.
   // Driven by message content and the send action, NOT by the SSE lock event,

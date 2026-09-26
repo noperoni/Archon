@@ -75,6 +75,8 @@ import type { DagNode } from '@archon/workflows/schemas/dag-node';
 import type { RunModelOverrides } from '@archon/workflows/model-validation';
 import type { WorkflowRunConfigInput } from '@archon/workflows/schemas/run-config';
 import { createWorkflowDeps } from '../workflows/store-adapter';
+import { waitForAnswer } from '../services/pending-questions';
+import type { UserQuestion } from '@archon/providers/types';
 import { createChildWorktreeResolver } from '../workflows/child-isolation-resolver';
 import {
   cleanupToMakeRoom,
@@ -520,7 +522,19 @@ async function dispatchBackgroundWorkflowOwned(
     unsubscribeBridge = webAdapter.setupEventBridge(workerPlatformId, ctx.conversationId);
   }
 
-  const workflowDeps = createWorkflowDeps();
+  // A node's AskUserQuestion is answerable only where the web UI can show it:
+  // on the run page (worker conversation) and in the chat that launched it.
+  // ponytail: only this dispatch path wires it; a resumed or CLI-launched run
+  // keeps the CLI default of no question tool. Thread it through those if needed.
+  const workflowDeps = {
+    ...createWorkflowDeps(),
+    ...(webAdapter
+      ? {
+          onUserQuestion: (question: UserQuestion): ReturnType<typeof waitForAnswer> =>
+            waitForAnswer(workerPlatformId, question, ctx.conversationId),
+        }
+      : {}),
+  };
 
   // Freeze this run's executable source, then re-resolve the workflow FROM the frozen
   // copy so the definition executed and the commands and scripts beside it are one

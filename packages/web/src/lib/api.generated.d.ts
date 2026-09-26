@@ -3458,6 +3458,7 @@ export interface components {
       input: {
         [key: string]: unknown;
       };
+      fromRun: boolean;
     }[];
     QuestionAnswerBody: {
       answers: {

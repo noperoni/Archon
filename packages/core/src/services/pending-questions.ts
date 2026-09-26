@@ -4,7 +4,9 @@
  * The Claude provider's prompt surface awaits `waitForAnswer`; the server's
  * answer route settles it with `answerQuestion`. Keyed by the tool_use id, which
  * the UI already holds from the `tool_call` event, and checked against the
- * conversation so one chat cannot answer another's question.
+ * conversation so one chat cannot answer another's question. A workflow run's
+ * question also shows in the chat that launched the run (`parentConversationId`),
+ * and either may answer it.
  *
  * ponytail: in-memory, so a server restart drops every pending question (the
  * turn dies with the restart anyway). Persist only if runs ever outlive it.
@@ -13,6 +15,7 @@ import type { UserQuestion, UserQuestionAnswer } from '@archon/providers/types';
 
 interface Pending {
   conversationId: string;
+  parentConversationId?: string;
   input: Record<string, unknown>;
   settle: (answer: UserQuestionAnswer | null) => void;
 }
@@ -21,7 +24,8 @@ const pending = new Map<string, Pending>();
 
 export function waitForAnswer(
   conversationId: string,
-  question: UserQuestion
+  question: UserQuestion,
+  parentConversationId?: string
 ): Promise<UserQuestionAnswer | null> {
   const { toolUseId, input, signal } = question;
   return new Promise(resolve => {
@@ -38,7 +42,7 @@ export function waitForAnswer(
       resolve(answer);
     };
     signal.addEventListener('abort', onAbort, { once: true });
-    pending.set(toolUseId, { conversationId, input, settle });
+    pending.set(toolUseId, { conversationId, parentConversationId, input, settle });
   });
 }
 
@@ -49,16 +53,27 @@ export function answerQuestion(
   answer: UserQuestionAnswer | null
 ): boolean {
   const entry = pending.get(toolUseId);
-  if (entry?.conversationId !== conversationId) return false;
+  if (entry === undefined || !visibleIn(entry, conversationId)) return false;
   entry.settle(answer);
   return true;
 }
 
-/** Questions still waiting in this conversation, oldest first. */
+function visibleIn(entry: Pending, conversationId: string): boolean {
+  return entry.conversationId === conversationId || entry.parentConversationId === conversationId;
+}
+
+/**
+ * Questions still waiting in this conversation, oldest first. `fromRun` marks
+ * one asked by a workflow run this conversation launched.
+ */
 export function listQuestions(
   conversationId: string
-): { toolUseId: string; input: Record<string, unknown> }[] {
+): { toolUseId: string; input: Record<string, unknown>; fromRun: boolean }[] {
   return [...pending]
-    .filter(([, p]) => p.conversationId === conversationId)
-    .map(([toolUseId, p]) => ({ toolUseId, input: p.input }));
+    .filter(([, p]) => visibleIn(p, conversationId))
+    .map(([toolUseId, p]) => ({
+      toolUseId,
+      input: p.input,
+      fromRun: p.conversationId !== conversationId,
+    }));
 }

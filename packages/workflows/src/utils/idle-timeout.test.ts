@@ -212,4 +212,38 @@ describe('withIdleTimeout', () => {
     expect(result).toEqual([{ type: 'assistant' }, { type: 'tool' }]);
     expect(onTimeout).toHaveBeenCalledTimes(1);
   });
+
+  test('a held clock never fires, however long the silence', async () => {
+    const onTimeout = mock(() => {});
+    const hold = { held: 1, releasedAt: 0 };
+    // Waits 200ms (four timeouts' worth) held, then yields and finishes.
+    async function* answeredLate(): AsyncGenerator<string> {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      hold.held = 0;
+      hold.releasedAt = Date.now();
+      yield 'answered';
+    }
+    const result: string[] = [];
+    for await (const v of withIdleTimeout(answeredLate(), 50, onTimeout, undefined, hold)) {
+      result.push(v);
+    }
+    expect(result).toEqual(['answered']);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  test('the clock restarts from the release, then fires as usual', async () => {
+    const onTimeout = mock(() => {});
+    const hold = { held: 1, releasedAt: 0 };
+    setTimeout(() => {
+      hold.held = 0;
+      hold.releasedAt = Date.now();
+    }, 120);
+    const started = Date.now();
+    for await (const _ of withIdleTimeout(hangAfter<string>([]), 50, onTimeout, undefined, hold)) {
+      // never yields
+    }
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    // Released at ~120ms, so the timeout lands no earlier than ~170ms.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(160);
+  });
 });

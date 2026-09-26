@@ -21,6 +21,17 @@
  */
 export const STEP_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * Stops the idle clock while the silence is a human's, not a hang: a node
+ * waiting on an AskUserQuestion answer is quiet by design and must wait as long
+ * as the human takes. `held` counts open waits; `releasedAt` restarts the clock
+ * from the moment the last one settled.
+ */
+export interface IdleHold {
+  held: number;
+  releasedAt: number;
+}
+
 /** Sentinel value to distinguish idle timeout from normal generator completion */
 const IDLE_TIMEOUT_SENTINEL = Symbol('IDLE_TIMEOUT');
 
@@ -43,15 +54,19 @@ const IDLE_TIMEOUT_SENTINEL = Symbol('IDLE_TIMEOUT');
  * @param timeoutMs - Maximum idle time in milliseconds before terminating
  * @param onTimeout - Optional callback invoked when idle timeout fires (before return)
  * @param shouldResetTimer - Optional predicate; return false to NOT reset the timer for a value
+ * @param hold - Optional hold; while `held > 0` the timeout never fires
  */
 export async function* withIdleTimeout<T>(
   generator: AsyncGenerator<T>,
   timeoutMs: number,
   onTimeout?: () => void,
-  shouldResetTimer?: (value: T) => boolean
+  shouldResetTimer?: (value: T) => boolean,
+  hold?: IdleHold
 ): AsyncGenerator<T> {
   let timedOut = false;
   let timerStartedAt = Date.now();
+  // Survives a held expiry: the pending next() must not be requested twice.
+  let nextPromise: Promise<IteratorResult<T>> | undefined;
 
   try {
     while (true) {
@@ -66,10 +81,21 @@ export async function* withIdleTimeout<T>(
       });
 
       // Start waiting for the next value from the generator
-      const nextPromise = generator.next();
+      nextPromise ??= generator.next();
 
       const result = await Promise.race([nextPromise, timeoutPromise]);
       clearTimeout(timer);
+
+      if (result === IDLE_TIMEOUT_SENTINEL && hold !== undefined) {
+        if (hold.held > 0) {
+          timerStartedAt = Date.now();
+          continue;
+        }
+        if (hold.releasedAt > timerStartedAt) {
+          timerStartedAt = hold.releasedAt;
+          continue;
+        }
+      }
 
       if (result === IDLE_TIMEOUT_SENTINEL) {
         timedOut = true;
@@ -81,6 +107,7 @@ export async function* withIdleTimeout<T>(
         return;
       }
 
+      nextPromise = undefined;
       if (result.done) return;
 
       // Reset the timer unless the predicate says not to

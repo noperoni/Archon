@@ -34,6 +34,7 @@ import type {
   OverlayChangeSummary,
 } from '@archon/providers/types';
 import { CONTAINER_ENV_DENYLIST, mergeTokenUsage } from '@archon/providers/types';
+import type { UserQuestionAnswer } from '@archon/providers/types';
 import type { ContainerRunContext } from './container-context';
 import { WRITEBACK_GATE_NODE_ID } from './container-context';
 import {
@@ -137,7 +138,7 @@ import {
   logWorkflowError,
   type WorkflowUsage,
 } from './logger';
-import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS } from './utils/idle-timeout';
+import { withIdleTimeout, STEP_IDLE_TIMEOUT_MS, type IdleHold } from './utils/idle-timeout';
 import { mapWithLimit } from './utils/map-with-limit';
 import { collectComposedSuspensionPaths, instantiateResolvedInclude } from './include-expander';
 import { buildInstanceSnapshots, composeFanOutScopeSegment } from './fan-out-identity';
@@ -968,6 +969,53 @@ export function shouldContinueStreamingForStatus(status: WorkflowRunStatus | nul
 /** Throttle state for activity heartbeat writes (only used for stale/zombie detection) */
 const lastNodeActivityUpdate = new Map<string, number>();
 const ACTIVITY_HEARTBEAT_INTERVAL_MS = 60_000;
+
+/**
+ * HK-47 fork: the prompt surface a node's session gets when the dispatcher can
+ * put a question in front of a human (`deps.onUserQuestion`). A node waiting on
+ * an answer streams nothing, so three things that ride on streamed messages
+ * would stall: the idle clock is held instead of firing, and the cancel check
+ * and heartbeat run on a timer, or a cancel clicked during the wait would go
+ * unseen and the run would look dead. The wait itself has no ceiling, as in a
+ * terminal: it ends when the human answers or the node is aborted.
+ */
+function nodeQuestionSurface(
+  deps: WorkflowDeps,
+  workflowRunId: string,
+  abortController: AbortController,
+  hold: IdleHold
+): Pick<SendQueryOptions, 'onUserQuestion'> {
+  const ask = deps.onUserQuestion;
+  if (ask === undefined) return {};
+  const watch = async (): Promise<void> => {
+    try {
+      const status = await deps.store.getWorkflowRunStatus(workflowRunId);
+      if (!shouldContinueStreamingForStatus(status)) {
+        abortController.abort();
+        return;
+      }
+      await deps.store.updateWorkflowActivity(workflowRunId);
+    } catch (err) {
+      getLog().warn({ err: err as Error, workflowRunId }, 'dag.question_watch_failed');
+    }
+  };
+  return {
+    onUserQuestion: async (question): Promise<UserQuestionAnswer | null> => {
+      hold.held++;
+      const timer = setInterval(() => void watch(), CANCEL_CHECK_INTERVAL_MS);
+      try {
+        return await ask({
+          ...question,
+          signal: AbortSignal.any([question.signal, abortController.signal]),
+        });
+      } finally {
+        clearInterval(timer);
+        hold.held--;
+        hold.releasedAt = Date.now();
+      }
+    },
+  };
+}
 
 /** Default DAG node retry for TRANSIENT errors */
 const DEFAULT_NODE_MAX_RETRIES = 2;
@@ -2310,10 +2358,12 @@ async function executeNodeInternal(
   // Request a fork when resuming. Exact-fork callers gate on sessionFork first;
   // legacy resume-only providers may continue the source session in place.
   const shouldForkSession = resumeSessionId !== undefined;
+  const nodeIdleHold: IdleHold = { held: 0, releasedAt: 0 };
   const nodeOptionsWithAbort: SendQueryOptions | undefined = {
     ...nodeOptions,
     abortSignal: nodeAbortController.signal,
     ...(shouldForkSession ? { forkSession: true } : {}),
+    ...nodeQuestionSurface(deps, workflowRun.id, nodeAbortController, nodeIdleHold),
   };
   let nodeIdleTimedOut = false;
   const effectiveIdleTimeout = node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
@@ -2365,7 +2415,9 @@ async function executeNodeInternal(
           'dag_node_idle_timeout_reached'
         );
         nodeAbortController.abort();
-      }
+      },
+      undefined,
+      nodeIdleHold
     )) {
       const tickNow = Date.now();
       const nodeKey = `${workflowRun.id}:${node.id}`;
@@ -6181,9 +6233,16 @@ async function executeLoopNode(
               ? basePrompt
               : `${basePrompt}\n\n---\n\nYour previous response did not match the required output schema:\n${reaskErrors.map(e => `- ${e}`).join('\n')}\n\nRespond again with output that satisfies the schema exactly.`;
 
+          const iterationIdleHold: IdleHold = { held: 0, releasedAt: 0 };
           const iterationOptions: SendQueryOptions | undefined = {
             ...resolvedOptions,
             abortSignal: iterationAbortController.signal,
+            ...nodeQuestionSurface(
+              deps,
+              workflowRun.id,
+              iterationAbortController,
+              iterationIdleHold
+            ),
           };
 
           // Reask attempts start a FRESH session (mirrors runStreamPass in
@@ -6200,14 +6259,20 @@ async function executeLoopNode(
 
           const effectiveIdleTimeout = node.idle_timeout ?? STEP_IDLE_TIMEOUT_MS;
 
-          for await (const msg of withIdleTimeout(generator, effectiveIdleTimeout, () => {
-            iterationIdleTimedOut = true;
-            getLog().warn(
-              { nodeId: node.id, iteration: i, timeoutMs: effectiveIdleTimeout },
-              'loop_node.idle_timeout_reached'
-            );
-            iterationAbortController.abort();
-          })) {
+          for await (const msg of withIdleTimeout(
+            generator,
+            effectiveIdleTimeout,
+            () => {
+              iterationIdleTimedOut = true;
+              getLog().warn(
+                { nodeId: node.id, iteration: i, timeoutMs: effectiveIdleTimeout },
+                'loop_node.idle_timeout_reached'
+              );
+              iterationAbortController.abort();
+            },
+            undefined,
+            iterationIdleHold
+          )) {
             // Mid-stream cancel/pause check (every CANCEL_CHECK_INTERVAL_MS) —
             // lifted from the AI-node stream loop in executeNodeInternal. Same
             // posture: `paused` is tolerated (a sibling approval node may pause
