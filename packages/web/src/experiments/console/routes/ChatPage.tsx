@@ -216,6 +216,7 @@ export function ChatPage(): ReactElement {
     setError(null);
     setNotice(null);
     setBusy(true); // optimistic: disable the composer immediately
+    scrollToBottom();
     void (async (): Promise<void> => {
       try {
         if (activeConvId === null) {
@@ -244,24 +245,33 @@ export function ChatPage(): ReactElement {
     })();
   };
 
-  // Inline auto-scroll: stick to bottom on new messages if already near it.
-  // Mirrors RunDetailPage's variant.
+  // Inline auto-scroll, mirroring RunDetailPage: follow intent belongs to user
+  // scrolling, not post-render geometry, and a ResizeObserver on the content
+  // follows a reply as it grows, not only when a new message row appears.
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastBottomRef = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const contentRef = useCallback((node: HTMLDivElement | null): (() => void) | undefined => {
+    if (node === null) return undefined;
+    const observer = new ResizeObserver(() => {
+      if (!lastBottomRef.current) return;
+      const el = scrollRef.current;
+      if (el !== null) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  // A switched conversation or a sent message always resumes following.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el === null) return;
-    lastBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-  });
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el === null || !lastBottomRef.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [messages?.length]);
+    lastBottomRef.current = true;
+    setAtBottom(true);
+  }, [activeConvId]);
 
   // Jump-to-bottom affordance: `atBottom` (state) drives the button's visibility;
   // `lastBottomRef` (above) drives the auto-scroll stickiness. Keep them in sync.
-  const [atBottom, setAtBottom] = useState(true);
   const handleScroll = useCallback((): void => {
     const el = scrollRef.current;
     if (el === null) return;
@@ -272,8 +282,9 @@ export function ChatPage(): ReactElement {
   const scrollToBottom = useCallback((): void => {
     const el = scrollRef.current;
     if (el === null) return;
-    el.scrollTop = el.scrollHeight;
+    lastBottomRef.current = true;
     setAtBottom(true);
+    el.scrollTop = el.scrollHeight;
   }, []);
 
   if (projectId === undefined) {
@@ -353,7 +364,7 @@ export function ChatPage(): ReactElement {
           className="h-full overflow-y-auto px-[30px] pt-[26px] pb-[18px]"
         >
           {/* Match the composer's centered 940px column (design: .stream-inner) */}
-          <div className="mx-auto max-w-[940px]">
+          <div ref={contentRef} className="mx-auto max-w-[940px]">
             {messageList.length === 0 && !busy ? (
               <EmptyState
                 title="No messages yet."
