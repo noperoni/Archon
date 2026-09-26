@@ -197,6 +197,7 @@ function makeApp(): { app: OpenAPIHono; mockWebAdapter: WebAdapter } {
     setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
     emitSSE: mock(async () => {}),
     emitLockEvent: mock(async () => {}),
+    pendingMessages: mock((_platformId: string) => []),
   } as unknown as WebAdapter;
   const mockLockManager = {
     acquireLock: mock(async (_id: string, fn: () => Promise<void>) => {

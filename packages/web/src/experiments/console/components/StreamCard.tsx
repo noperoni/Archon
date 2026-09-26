@@ -39,7 +39,7 @@ const KIND_STYLES: Record<StreamCardProps['kind'], KindStyle> = {
     borderColor: 'var(--border)',
   },
   assistant: {
-    label: 'Agent',
+    label: 'HK47',
     pill: 'bg-[color:var(--success-soft,oklch(0.755_0.165_168/0.14))] text-[color:var(--brand-teal)]',
     borderClass: 'border',
     borderColor: 'var(--border)',

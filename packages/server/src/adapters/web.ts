@@ -59,6 +59,13 @@ export class WebAdapter implements IWebPlatformAdapter {
     this.persistence.setConversationDbId(platformConversationId, dbId);
   }
 
+  /** Assistant segments of the running turn not yet written to the DB. */
+  pendingMessages(
+    platformConversationId: string
+  ): { content: string; metadata: Record<string, unknown> }[] {
+    return this.persistence.peek(platformConversationId);
+  }
+
   async sendMessage(
     conversationId: string,
     message: string,

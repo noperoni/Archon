@@ -28,6 +28,22 @@ interface AssistantBuffer {
   segments: BufferedSegment[];
 }
 
+/** The metadata column a segment's message row carries. */
+function segmentMetadata(seg: BufferedSegment): Record<string, unknown> {
+  const toolCalls = seg.toolCalls.map(tc => ({
+    name: tc.name,
+    input: tc.input,
+    duration: tc.duration,
+    ...(tc.output !== undefined ? { output: tc.output } : {}),
+  }));
+  return {
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
+    ...(seg.category ? { category: seg.category } : {}),
+    ...(seg.workflowDispatch ? { workflowDispatch: seg.workflowDispatch } : {}),
+    ...(seg.workflowResult ? { workflowResult: seg.workflowResult } : {}),
+  };
+}
+
 export class MessagePersistence {
   private assistantBuffer = new Map<string, AssistantBuffer>();
   private dbIdMap = new Map<string, string>(); // platform_conversation_id → DB UUID
@@ -168,6 +184,20 @@ export class MessagePersistence {
   }
 
   /**
+   * HK-47 fork: the segments still waiting for a flush, as the rows flush would
+   * write. The console refetches messages on every stream event, and text only
+   * reaches the DB when the lock releases, so without these a turn in progress
+   * shows nothing until it ends. Read-only: the buffer is untouched.
+   */
+  peek(conversationId: string): { content: string; metadata: Record<string, unknown> }[] {
+    const buf = this.assistantBuffer.get(conversationId);
+    if (!buf) return [];
+    return buf.segments
+      .filter(seg => seg.content || seg.toolCalls.length > 0)
+      .map(seg => ({ content: seg.content, metadata: segmentMetadata(seg) }));
+  }
+
+  /**
    * Flush buffered assistant segments to the database as individual message rows.
    * Each segment maps to one ChatMessage in the frontend, preserving the same
    * structure as the live streaming view (text+tools interleaving).
@@ -250,19 +280,7 @@ export class MessagePersistence {
       const { addMessage } = await import('@archon/core/db/messages');
       for (const seg of ready) {
         if (!seg.content && seg.toolCalls.length === 0) continue;
-        const toolCalls = seg.toolCalls.map(tc => ({
-          name: tc.name,
-          input: tc.input,
-          duration: tc.duration,
-          ...(tc.output !== undefined ? { output: tc.output } : {}),
-        }));
-        const metadata = {
-          ...(toolCalls.length > 0 ? { toolCalls } : {}),
-          ...(seg.category ? { category: seg.category } : {}),
-          ...(seg.workflowDispatch ? { workflowDispatch: seg.workflowDispatch } : {}),
-          ...(seg.workflowResult ? { workflowResult: seg.workflowResult } : {}),
-        };
-        await addMessage(dbId, 'assistant', seg.content, metadata);
+        await addMessage(dbId, 'assistant', seg.content, segmentMetadata(seg));
       }
     } catch (e: unknown) {
       getLog().error({ conversationId, err: e }, 'message_persistence_failed');

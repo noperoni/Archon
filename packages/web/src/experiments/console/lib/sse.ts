@@ -211,6 +211,13 @@ export function useConversationSSE(
           break;
         case 'conversation_lock':
           if (typeof ev.locked === 'boolean') onLockChange?.(ev.locked);
+          // HK-47 fork: the server flushes the turn to the DB before it emits the
+          // release, and the caller stops polling on it, so this refetch is the
+          // one that lands the final reply. Without it the reply waited for a reload.
+          if (ev.locked === false) {
+            messagesDirty = true;
+            scheduleFlush();
+          }
           break;
         // No run-detail cache here; ignore workflow_* and everything else.
         default:

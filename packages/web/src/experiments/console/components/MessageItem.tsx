@@ -129,7 +129,7 @@ export function MessageItem({ message, variant = 'chat' }: MessageItemProps): Re
     );
   }
 
-  const label = kind === 'system' ? 'System' : 'Agent';
+  const label = kind === 'system' ? 'System' : 'HK47';
 
   return (
     <div className="flex flex-col">

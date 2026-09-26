@@ -33,7 +33,7 @@ export function WorkingIndicator({
           borderTopColor: 'var(--running)',
         }}
       />
-      <span className="font-medium">Agent is working</span>
+      <span className="font-medium">HK47 is working</span>
       {activity !== null && activity !== undefined && activity !== '' ? (
         <span className="font-mono text-[11px] text-text-tertiary">· {activity}</span>
       ) : null}

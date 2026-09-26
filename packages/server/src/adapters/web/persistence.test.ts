@@ -103,6 +103,28 @@ describe('MessagePersistence', () => {
     });
   });
 
+  describe('peek (HK-47 fork: a turn in progress is visible before it flushes)', () => {
+    test('returns buffered segments as the rows flush would write, without consuming them', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'thinking');
+      persistence.appendToolCall('conv-1', { name: 'Bash', input: { command: 'ls' } });
+
+      const peeked = persistence.peek('conv-1');
+      expect(peeked).toHaveLength(1);
+      expect(peeked[0].content).toBe('thinking');
+      expect((peeked[0].metadata.toolCalls as { name: string }[])[0].name).toBe('Bash');
+
+      persistence.appendToolResult('conv-1', 'Bash', 'out', 5);
+      await persistence.flush('conv-1');
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      expect(persistence.peek('conv-1')).toEqual([]);
+    });
+
+    test('is empty for an unknown conversation', () => {
+      expect(persistence.peek('nope')).toEqual([]);
+    });
+  });
+
   describe('startPeriodicFlush / stopPeriodicFlush', () => {
     test('startPeriodicFlush is idempotent (double call does not create two timers)', () => {
       persistence.startPeriodicFlush();

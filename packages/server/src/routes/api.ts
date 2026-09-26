@@ -2977,7 +2977,22 @@ export function registerApiRoutes(
         return apiError(c, 404, 'Conversation not found');
       }
       const messages = await messageDb.listMessages(conv.id, limit);
-      return c.json(messages.map(toApiMessage));
+      // HK-47 fork: append the running turn's unflushed segments so a refetch
+      // mid-turn shows it. Ids are positional; they change once the segment
+      // flushes to a real row, which the console treats as new content.
+      const now = new Date().toISOString();
+      const pending: MessageRow[] = webAdapter
+        .pendingMessages(platformConversationId)
+        .map((m, i) => ({
+          id: `pending-${String(i)}`,
+          conversation_id: conv.id,
+          role: 'assistant',
+          content: m.content,
+          metadata: JSON.stringify(m.metadata),
+          user_id: null,
+          created_at: now,
+        }));
+      return c.json([...messages, ...pending].map(toApiMessage));
     } catch (error) {
       getLog().error({ err: error }, 'list_messages_failed');
       return apiError(c, 500, 'Failed to list messages');
