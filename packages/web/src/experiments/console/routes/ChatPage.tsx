@@ -16,6 +16,10 @@ import type { Project } from '../primitives/project';
 import type { Message } from '../primitives/message';
 import { QUESTION_POLL_MS, type PendingQuestion } from '../skills/messages';
 import type { ConversationSummary } from '../primitives/conversation';
+import type { ClaudeSession } from '../skills/conversations';
+
+const NEW_CONVERSATION = '__new';
+const TERMINAL_PREFIX = 'claude:';
 
 // While a turn is active, refetch messages on this cadence so streamed replies
 // still surface if a per-conversation SSE event is dropped (cross-origin
@@ -55,13 +59,47 @@ export function ChatPage(): ReactElement {
     () => (projectId !== undefined ? skill.listConversations(projectId) : Promise.resolve([]))
   );
 
+  // The project's terminal transcripts, resumable here (HK47 fork, PERS-18).
+  const { data: claudeSessions } = useEntity<ClaudeSession[]>(
+    projectId !== undefined ? K.claudeSessions(projectId) : 'noop:no-project-sessions',
+    () => (projectId !== undefined ? skill.listClaudeSessions(projectId) : Promise.resolve([]))
+  );
+
   // Active conversation: most-recent web conversation, else null until first send.
+  // `picked` stops that default from overriding an explicit "New conversation".
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [picked, setPicked] = useState(false);
   useEffect(() => {
-    if (activeConvId !== null) return;
+    if (activeConvId !== null || picked) return;
     const web = (conversations ?? []).find(c => c.platformType === 'web');
     if (web !== undefined) setActiveConvId(web.id);
-  }, [conversations, activeConvId]);
+  }, [conversations, activeConvId, picked]);
+
+  const onPick = (value: string): void => {
+    if (projectId === undefined) return;
+    setPicked(true);
+    setError(null);
+    if (value === NEW_CONVERSATION) {
+      setActiveConvId(null);
+      return;
+    }
+    if (!value.startsWith(TERMINAL_PREFIX)) {
+      setActiveConvId(value);
+      return;
+    }
+    void (async (): Promise<void> => {
+      try {
+        const conv = await skill.resumeClaudeSession(
+          projectId,
+          value.slice(TERMINAL_PREFIX.length)
+        );
+        setActiveConvId(conv.conversationId);
+        invalidate(K.conversations(projectId));
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : 'Resume failed.');
+      }
+    })();
+  };
 
   const { data: messages, error: messagesError } = useEntity<Message[]>(
     activeConvId !== null ? K.messages(activeConvId) : 'noop:no-conv',
@@ -273,6 +311,37 @@ export function ChatPage(): ReactElement {
             </h1>
             <p className="text-xs text-text-tertiary">{project?.path ?? 'Loading…'}</p>
           </div>
+          <select
+            aria-label="Conversation"
+            value={activeConvId ?? NEW_CONVERSATION}
+            disabled={busy}
+            onChange={e => {
+              onPick(e.target.value);
+            }}
+            className="max-w-[320px] shrink-0 truncate rounded border border-border bg-surface-elevated px-2 py-1 text-xs text-text-secondary"
+          >
+            <option value={NEW_CONVERSATION}>New conversation</option>
+            {(conversations ?? []).some(c => c.platformType === 'web') ? (
+              <optgroup label="Console">
+                {(conversations ?? [])
+                  .filter(c => c.platformType === 'web')
+                  .map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.title ?? 'Untitled'}
+                    </option>
+                  ))}
+              </optgroup>
+            ) : null}
+            {(claudeSessions ?? []).length > 0 ? (
+              <optgroup label="Terminal (resume)">
+                {(claudeSessions ?? []).map(t => (
+                  <option key={t.sessionId} value={`${TERMINAL_PREFIX}${t.sessionId}`}>
+                    {t.lastActivity.slice(0, 10)} {t.title}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+          </select>
         </div>
         <ProjectViewTabs projectId={projectId} active="chat" />
       </header>

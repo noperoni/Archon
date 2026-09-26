@@ -266,6 +266,7 @@ import * as isolationEnvDb from '@archon/core/db/isolation-environments';
 import * as workflowDb from '@archon/core/db/workflows';
 import * as workflowEventDb from '@archon/core/db/workflow-events';
 import * as messageDb from '@archon/core/db/messages';
+import { createSession } from '@archon/core/db/sessions';
 import * as userDb from '@archon/core/db/users';
 import {
   abandonWorkflow,
@@ -329,7 +330,13 @@ import {
   setEnvVarBodySchema,
   codebaseEnvVarParamsSchema,
   envVarMutationResponseSchema,
+  claudeSessionListResponseSchema,
+  claudeSessionParamsSchema,
 } from './schemas/codebase.schemas';
+import {
+  claudeTranscriptPath,
+  listClaudeTranscripts,
+} from '@archon/core/services/claude-transcripts';
 import {
   updateAssistantConfigBodySchema,
   updateAssistantConfigResponseSchema,
@@ -840,6 +847,38 @@ const listEnvVarsRoute = createRoute({
       description: 'Env vars for codebase',
     },
     404: jsonError('Codebase not found'),
+  },
+});
+
+// HK47 fork (PERS-18): a project's terminal conversations, resumable from the console.
+const listClaudeSessionsRoute = createRoute({
+  method: 'get',
+  path: '/api/codebases/{id}/claude-sessions',
+  tags: ['Codebases'],
+  summary: "List the project's Claude Code transcripts, most recent first",
+  request: { params: codebaseIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: claudeSessionListResponseSchema } },
+      description: 'Transcripts for the project',
+    },
+    404: jsonError('Codebase not found'),
+  },
+});
+
+const resumeClaudeSessionRoute = createRoute({
+  method: 'post',
+  path: '/api/codebases/{id}/claude-sessions/{sessionId}/resume',
+  tags: ['Codebases'],
+  summary: 'Open a Claude Code transcript as a web conversation that resumes it',
+  request: { params: claudeSessionParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: createConversationResponseSchema } },
+      description: 'Conversation seeded to resume the session',
+    },
+    400: jsonError('Bad request'),
+    404: jsonError('Codebase or transcript not found'),
   },
 });
 
@@ -3317,6 +3356,78 @@ export function registerApiRoutes(
     } catch (error) {
       getLog().error({ err: error, codebaseId: id }, 'list_env_vars_failed');
       return apiError(c, 500, 'Failed to list env vars');
+    }
+  });
+
+  // The config dir a codebase's sessions run under: its own binding, else the server's.
+  async function claudeConfigDirOf(codebaseId: string): Promise<string> {
+    const envVars = await envVarDb.getCodebaseEnvVars(codebaseId);
+    return envVars.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+  }
+
+  // GET /api/codebases/:id/claude-sessions - the project's terminal transcripts
+  registerOpenApiRoute(listClaudeSessionsRoute, async c => {
+    const id = c.req.param('id') ?? '';
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      const sessions = await listClaudeTranscripts(
+        await claudeConfigDirOf(id),
+        codebase.default_cwd
+      );
+      return c.json({ sessions });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id }, 'list_claude_sessions_failed');
+      return apiError(c, 500, 'Failed to list Claude sessions');
+    }
+  });
+
+  // POST /api/codebases/:id/claude-sessions/:sessionId/resume
+  // A new web conversation whose active session row already carries the terminal's
+  // session id, so its first message goes to the SDK as `resume`. Same cwd and
+  // config dir as the terminal, which is what makes the SDK find the transcript.
+  registerOpenApiRoute(resumeClaudeSessionRoute, async c => {
+    const id = c.req.param('id') ?? '';
+    const sessionId = c.req.param('sessionId') ?? '';
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      if (codebase.ai_assistant_type !== 'claude') {
+        return apiError(c, 400, 'Only Claude projects can resume a Claude Code session');
+      }
+      const configDir = await claudeConfigDirOf(id);
+      const path = claudeTranscriptPath(configDir, codebase.default_cwd, sessionId);
+      if (!path) return apiError(c, 400, 'Not a Claude session id');
+      if (!existsSync(path)) return apiError(c, 404, 'Transcript not found');
+      const transcript = (await listClaudeTranscripts(configDir, codebase.default_cwd)).find(
+        t => t.sessionId === sessionId
+      );
+
+      const userId = await resolveWebUserId(c);
+      const platformId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const conversation = await conversationDb.getOrCreateConversation(
+        'web',
+        platformId,
+        id,
+        undefined,
+        userId
+      );
+      webAdapter.setConversationDbId(conversation.platform_conversation_id, conversation.id);
+      await createSession({
+        conversation_id: conversation.id,
+        codebase_id: id,
+        ai_assistant_type: conversation.ai_assistant_type,
+        assistant_session_id: sessionId,
+        transition_reason: 'first-message',
+      });
+      await conversationDb.updateConversationTitle(
+        conversation.id,
+        transcript?.title ?? `Terminal session ${sessionId.slice(0, 8)}`
+      );
+      return c.json({ conversationId: conversation.platform_conversation_id, id: conversation.id });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id, sessionId }, 'resume_claude_session_failed');
+      return apiError(c, 500, 'Failed to resume Claude session');
     }
   });
 

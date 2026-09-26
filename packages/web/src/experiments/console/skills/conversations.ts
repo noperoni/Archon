@@ -81,3 +81,29 @@ export async function sendMessage(
     throw new HttpError(res.status, path, msg);
   }
 }
+
+/** A Claude Code transcript of this project, as a terminal would list it (HK47 fork, PERS-18). */
+export interface ClaudeSession {
+  sessionId: string;
+  title: string;
+  lastActivity: string;
+  sizeBytes: number;
+}
+
+export async function listClaudeSessions(projectId: string): Promise<ClaudeSession[]> {
+  const res = await requestJson<{ sessions: ClaudeSession[] }>(
+    `/api/codebases/${encodeURIComponent(projectId)}/claude-sessions`
+  );
+  return res.sessions;
+}
+
+/** Open a terminal session as a web conversation that resumes it. */
+export async function resumeClaudeSession(
+  projectId: string,
+  sessionId: string
+): Promise<CreateConversationResponse> {
+  return requestJson<CreateConversationResponse>(
+    `/api/codebases/${encodeURIComponent(projectId)}/claude-sessions/${encodeURIComponent(sessionId)}/resume`,
+    { method: 'POST' }
+  );
+}

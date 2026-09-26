@@ -48,6 +48,22 @@ export const codebaseEnvVarsResponseSchema = z
   })
   .openapi('CodebaseEnvVarsResponse');
 
+/** GET /api/codebases/:id/claude-sessions: the project's terminal transcripts (HK47 fork, PERS-18). */
+export const claudeSessionListResponseSchema = z
+  .object({
+    sessions: z.array(
+      z.object({
+        sessionId: z.string(),
+        title: z.string(),
+        lastActivity: z.string(),
+        sizeBytes: z.number(),
+      })
+    ),
+  })
+  .openapi('ClaudeSessionListResponse');
+
+export const claudeSessionParamsSchema = z.object({ id: z.string(), sessionId: z.string() });
+
 /** Body for PUT /api/codebases/:id/env — upsert one key-value pair */
 export const setEnvVarBodySchema = z
   .object({
