@@ -142,16 +142,22 @@ describe('resolveSkillDirectories', () => {
 
 describe('resolveClaudeSkillDirectories', () => {
   const originalHome = process.env.HOME;
+  // A developer shell that sets CLAUDE_CONFIG_DIR would otherwise win over the
+  // staged HOME and point user-skill lookup at the real config dir.
+  const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
   let fake: ReturnType<typeof makeFakeWorld>;
 
   beforeEach(() => {
     fake = makeFakeWorld();
     process.env.HOME = fake.home;
+    delete process.env.CLAUDE_CONFIG_DIR;
   });
 
   afterEach(() => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
     rmSync(fake.root, { recursive: true, force: true });
   });
 
