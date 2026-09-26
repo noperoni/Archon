@@ -1127,18 +1127,25 @@ describe('validateWorkflowResources — skills search roots', () => {
   // (skillSearchRoots in @archon/providers) would find them: .agents/skills/
   // and .claude/skills/, at both project (cwd) and user (HOME) level.
   let originalHome: string | undefined;
+  let originalConfigDir: string | undefined;
   let fakeHome: string;
 
   beforeEach(async () => {
     originalHome = process.env.HOME;
-    // Point HOME at a temp dir so real user-level skills can't leak in.
+    originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    // Point HOME at a temp dir so real user-level skills can't leak in, and drop
+    // CLAUDE_CONFIG_DIR: the resolver prefers it to HOME, so a shell that exports
+    // it would send the user-scope lookup to the real config instead.
     fakeHome = await mkdtemp(join(tmpdir(), 'validator-skills-home-'));
     process.env.HOME = fakeHome;
+    delete process.env.CLAUDE_CONFIG_DIR;
   });
 
   afterEach(async () => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
     await rm(fakeHome, { recursive: true, force: true });
   });
 
