@@ -304,9 +304,11 @@ async function waitForDetachedStartup(
 /**
  * Options for workflow run command
  *
- * Default: creates worktree with auto-generated branch name (isolation by default).
+ * Default: runs in place in the live checkout (HK47 fork, PERS-18). A worktree
+ * is only cut for --branch/--from/--base, or when the workflow pins
+ * `worktree.enabled: true` (then with an auto-generated branch name).
  * --branch: explicit branch name for the worktree.
- * --no-worktree: opt out of isolation, run in live checkout.
+ * --no-worktree: explicit in-place run (the default; rejected by a worktree pin).
  * --resume: reuse worktree from last failed run.
  * --from: override base branch (start-point for worktree).
  * --base: per-dispatch PR base + worktree cut-from override (wins over config).
@@ -1982,13 +1984,22 @@ async function runWorkflowWithOwnedSource(
     }
   }
 
-  // Default to worktree isolation unless --no-worktree or --resume. Workflow YAML
-  // `worktree.enabled` pins the decision — mismatches with CLI flags are rejected
+  // Isolation comes from a branch flag (see the HK47 note below), never from
+  // --no-worktree or --resume. Workflow YAML `worktree.enabled` pins the decision — mismatches with CLI flags are rejected
   // above, so by this point policy (if set) and flags agree. `--resume` reuses an
   // existing worktree and takes precedence over the pinned policy. Computed here
   // (not at the worktree block below) because --detach also needs it to decide
   // whether to pin a generated branch on the child.
-  const flagWantsIsolation = !options.resume && !options.noWorktree;
+  // HK47 fork (PERS-18): in place by default, as the orchestrator runs them since
+  // 995608d3, because a worktree is another path and Claude Code keys the
+  // project's memory and transcripts on the path. Isolation now needs a branch
+  // flag or the workflow's `worktree.enabled: true`; --no-worktree stays valid.
+  const flagWantsIsolation =
+    !options.resume &&
+    !options.noWorktree &&
+    (options.branchName !== undefined ||
+      options.fromBranch !== undefined ||
+      options.baseBranch !== undefined);
   // Reassigned by adoption resolution (#2747): adopting a branch whose worktree
   // is gone forces isolation ON to cut a fresh worktree FROM that branch.
   let wantsIsolation =

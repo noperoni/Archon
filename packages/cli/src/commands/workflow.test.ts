@@ -2187,14 +2187,14 @@ describe('workflowRunCommand', () => {
       errors: [],
     });
 
-    // "smart" substring-matches only "archon-smart-pr-review"
-    // Will fail downstream at executeWorkflow mock, but must NOT throw "not found"
-    const error = await workflowRunCommand('/test/path', 'smart', 'hello').catch(
-      (e: unknown) => e as Error
+    // "smart" substring-matches only "archon-smart-pr-review". Runs in place by
+    // default (PERS-18), so nothing downstream throws: it must simply resolve.
+    await workflowRunCommand('/test/path', 'smart', 'hello');
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ requested: 'smart', matched: 'archon-smart-pr-review' }),
+      'workflow.resolve_substring_match'
     );
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).not.toContain('not found');
-    expect((error as Error).message).not.toContain('Did you mean');
   });
 
   it('should prefer case-insensitive exact match over suffix match', async () => {
@@ -2323,7 +2323,7 @@ describe('workflowRunCommand', () => {
     );
   });
 
-  it('should throw when codebase lookup fails (isolation is default)', async () => {
+  it('should throw when codebase lookup fails when isolating via --branch', async () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     const conversationDb = await import('@archon/core/db/conversations');
     const codebaseDb = await import('@archon/core/db/codebases');
@@ -2339,9 +2339,9 @@ describe('workflowRunCommand', () => {
       new Error('ECONNREFUSED')
     );
 
-    await expect(workflowRunCommand('/test/path', 'assist', 'hello')).rejects.toThrow(
-      'Cannot create worktree: database lookup failed'
-    );
+    await expect(
+      workflowRunCommand('/test/path', 'assist', 'hello', { branchName: 'feat-x' })
+    ).rejects.toThrow('Cannot create worktree: database lookup failed');
   });
 
   it('should continue when codebase lookup fails with --no-worktree', async () => {
@@ -2368,6 +2368,37 @@ describe('workflowRunCommand', () => {
 
     // With --no-worktree, DB failure is non-fatal — user explicitly opted out of isolation
     await workflowRunCommand('/test/path', 'assist', 'hello', { noWorktree: true });
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: '/test/path' }),
+      'cli.codebase_lookup_failed'
+    );
+  });
+
+  it('should continue when codebase lookup fails by default (in place, PERS-18)', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    const { executeWorkflow } = await import('@archon/workflows/executor');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockRejectedValueOnce(
+      new Error('ECONNREFUSED')
+    );
+    (conversationDb.updateConversation as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
+    (executeWorkflow as ReturnType<typeof mock>).mockResolvedValueOnce({
+      success: true,
+      workflowRunId: 'run-123',
+    });
+
+    // No branch flag: runs in the live checkout, so a DB failure is non-fatal.
+    await workflowRunCommand('/test/path', 'assist', 'hello', {});
 
     expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ cwd: '/test/path' }),
@@ -2697,17 +2728,18 @@ describe('workflowRunCommand', () => {
     );
   });
 
-  it('creates worktree with auto-generated branch when no --branch given', async () => {
+  it('runs in place by default when no --branch given (PERS-18)', async () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     const { executeWorkflow } = await import('@archon/workflows/executor');
     const conversationDb = await import('@archon/core/db/conversations');
     const codebaseDb = await import('@archon/core/db/codebases');
     const isolation = await import('@archon/isolation');
-    const isolationDb = await import('@archon/core/db/isolation-environments');
 
-    // Snapshot call counts before this test (process-global mocks)
-    const findActiveCallsBefore = (isolationDb.findActiveByWorkflow as ReturnType<typeof mock>).mock
-      .calls.length;
+    const getIsolationProviderMock = isolation.getIsolationProvider as ReturnType<typeof mock>;
+    const providerBefore = getIsolationProviderMock.mock.results.at(-1)?.value as
+      | { create: ReturnType<typeof mock> }
+      | undefined;
+    const createCallsBefore = providerBefore?.create.mock.calls.length ?? 0;
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
       workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
@@ -2726,7 +2758,54 @@ describe('workflowRunCommand', () => {
       workflowRunId: 'run-123',
     });
 
-    // No branchName, no noWorktree — should auto-isolate
+    // No branchName, no noWorktree, no policy pin: must NOT isolate.
+    await workflowRunCommand('/test/path', 'assist', 'hello', {});
+
+    const providerAfter = getIsolationProviderMock.mock.results.at(-1)?.value as
+      | { create: ReturnType<typeof mock> }
+      | undefined;
+    expect(providerAfter?.create.mock.calls.length ?? 0).toBe(createCallsBefore);
+    // Executed against the live checkout path, not a worktree.
+    const lastExec = (executeWorkflow as ReturnType<typeof mock>).mock.calls.at(-1) as unknown[];
+    expect(lastExec[3]).toBe('/test/path');
+  });
+
+  it('creates worktree with auto-generated branch when the workflow pins worktree.enabled: true', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    const { executeWorkflow } = await import('@archon/workflows/executor');
+    const conversationDb = await import('@archon/core/db/conversations');
+    const codebaseDb = await import('@archon/core/db/codebases');
+    const isolation = await import('@archon/isolation');
+    const isolationDb = await import('@archon/core/db/isolation-environments');
+
+    // Snapshot call counts before this test (process-global mocks)
+    const findActiveCallsBefore = (isolationDb.findActiveByWorkflow as ReturnType<typeof mock>).mock
+      .calls.length;
+
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'assist',
+          description: 'Help',
+          worktree: { enabled: true },
+        }),
+      ],
+      errors: [],
+    });
+    (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'conv-123',
+    });
+    (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce({
+      id: 'cb-123',
+      default_cwd: '/test/path',
+    });
+    (conversationDb.updateConversation as ReturnType<typeof mock>).mockResolvedValueOnce(undefined);
+    (executeWorkflow as ReturnType<typeof mock>).mockResolvedValueOnce({
+      success: true,
+      workflowRunId: 'run-123',
+    });
+
+    // No branchName; the workflow's policy pin is what isolates
     await workflowRunCommand('/test/path', 'assist', 'hello', {});
 
     const getIsolationProviderMock = isolation.getIsolationProvider as ReturnType<typeof mock>;
@@ -2817,9 +2896,9 @@ describe('workflowRunCommand', () => {
       )
     );
 
-    const error = await workflowRunCommand('/test/path', 'assist', 'hello', {}).catch(
-      err => err as Error
-    );
+    const error = await workflowRunCommand('/test/path', 'assist', 'hello', {
+      branchName: 'feat-x',
+    }).catch(err => err as Error);
 
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain('Cannot create worktree: repository registration failed.');
@@ -2884,9 +2963,9 @@ describe('workflowRunCommand', () => {
       new Error("EACCES: permission denied, mkdir '/home/test/.archon/workspaces/acme'")
     );
 
-    const error = await workflowRunCommand('/test/path', 'assist', 'hello', {}).catch(
-      err => err as Error
-    );
+    const error = await workflowRunCommand('/test/path', 'assist', 'hello', {
+      branchName: 'feat-x',
+    }).catch(err => err as Error);
 
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain('Cannot create worktree: repository registration failed.');
@@ -3067,7 +3146,13 @@ describe('workflowRunCommand', () => {
     const gitModule = await import('@archon/git');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'assist',
+          description: 'Help',
+          worktree: { enabled: true },
+        }),
+      ],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -3338,7 +3423,13 @@ describe('workflowRunCommand', () => {
     const isolation = await import('@archon/isolation');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'assist',
+          description: 'Help',
+          worktree: { enabled: true },
+        }),
+      ],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -3355,7 +3446,7 @@ describe('workflowRunCommand', () => {
       workflowRunId: 'run-123',
     });
 
-    // No branchName, no noWorktree — auto-isolates via provider.create
+    // No branchName; the worktree.enabled pin isolates via provider.create
     await workflowRunCommand('/test/path', 'assist', 'hello', {});
 
     const getIsolationProviderMock = isolation.getIsolationProvider as ReturnType<typeof mock>;
@@ -3566,7 +3657,13 @@ describe('workflowRunCommand', () => {
     const isolation = await import('@archon/isolation');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'assist',
+          description: 'Help',
+          worktree: { enabled: true },
+        }),
+      ],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -3607,7 +3704,13 @@ describe('workflowRunCommand', () => {
     const isolation = await import('@archon/isolation');
 
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'assist',
+          description: 'Help',
+          worktree: { enabled: true },
+        }),
+      ],
       errors: [],
     });
     (conversationDb.getOrCreateConversation as ReturnType<typeof mock>).mockResolvedValueOnce({
@@ -5425,7 +5528,13 @@ describe('workflowRunCommand — detach', () => {
     const { executeWorkflow } = await import('@archon/workflows/executor');
     const paths = await import('@archon/paths');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'assist',
+          description: 'Help',
+          worktree: { enabled: true },
+        }),
+      ],
       errors: [],
     });
     // Force the log-file path to fall back to 'ignore' so the test writes no files
@@ -5490,6 +5599,38 @@ describe('workflowRunCommand — detach', () => {
     const execAfter = (executeWorkflow as ReturnType<typeof mock>).mock.calls.length;
     expect(execAfter).toBe(execBefore);
     expect(child.unref).toHaveBeenCalledTimes(1);
+    expect(consoleSpy).toHaveBeenCalledWith("Started 'assist' in the background.");
+  });
+
+  it('does NOT pin a --branch on the detached child by default (in place, PERS-18)', async () => {
+    const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
+    const paths = await import('@archon/paths');
+    (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
+      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      errors: [],
+    });
+    (paths.getArchonHome as ReturnType<typeof mock>).mockImplementationOnce(() => {
+      throw new Error('no home in test');
+    });
+
+    const child = createDetachedChildFixture();
+    const spawnSpy = spyOn(Bun, 'spawn').mockReturnValue(child.child);
+    const savedArgv = process.argv;
+    process.argv = ['bun', '/abs/cli.ts', 'workflow', 'run', 'assist', 'hello', '--detach'];
+    let spawnCmd: string[] = [];
+    try {
+      const commandPromise = workflowRunCommand('/test/path', 'assist', 'hello', { detach: true });
+      await finishStartupWindow(commandPromise, spawnSpy);
+      spawnCmd = (
+        (spawnSpy.mock.calls[0]?.[0] as { cmd: string[] } | undefined)?.cmd ?? []
+      ).slice();
+    } finally {
+      process.argv = savedArgv;
+      spawnSpy.mockRestore();
+    }
+
+    expect(spawnCmd).toContain('--conversation-id');
+    expect(spawnCmd).not.toContain('--branch');
     expect(consoleSpy).toHaveBeenCalledWith("Started 'assist' in the background.");
   });
 
@@ -5892,7 +6033,13 @@ describe('workflowRunCommand — detach', () => {
     const { discoverWorkflowsWithConfig } = await import('@archon/workflows/workflow-discovery');
     const codebaseDb = await import('@archon/core/db/codebases');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'assist',
+          description: 'Help',
+          worktree: { enabled: true },
+        }),
+      ],
       errors: [],
     });
     (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockRejectedValueOnce(
@@ -5918,7 +6065,13 @@ describe('workflowRunCommand — detach', () => {
     const codebaseDb = await import('@archon/core/db/codebases');
     const workflowDb = await import('@archon/core/db/workflows');
     (discoverWorkflowsWithConfig as ReturnType<typeof mock>).mockResolvedValueOnce({
-      workflows: [makeTestWorkflowWithSource({ name: 'assist', description: 'Help' })],
+      workflows: [
+        makeTestWorkflowWithSource({
+          name: 'assist',
+          description: 'Help',
+          worktree: { enabled: true },
+        }),
+      ],
       errors: [],
     });
     (codebaseDb.findCodebaseByDefaultCwd as ReturnType<typeof mock>).mockResolvedValueOnce(null);
@@ -6300,6 +6453,8 @@ describe('workflowRunCommand — detached child adopts the pre-created run (#287
       workflowRunCommand('/test/path', 'plan', 'hello', {
         detachedRunId: 'run-precreated',
         conversationId: 'cli-123',
+        // An isolating launch hands its child a pinned branch, as the parent does.
+        branchName: 'plan-123',
       })
     ).rejects.toThrow(/Cannot create worktree/);
 
@@ -6327,6 +6482,8 @@ describe('workflowRunCommand — detached child adopts the pre-created run (#287
       workflowRunCommand('/test/path', 'plan', 'hello', {
         detachedRunId: 'run-precreated',
         conversationId: 'cli-123',
+        // An isolating launch hands its child a pinned branch, as the parent does.
+        branchName: 'plan-123',
       })
     ).rejects.toThrow(/Cannot create worktree/);
 
