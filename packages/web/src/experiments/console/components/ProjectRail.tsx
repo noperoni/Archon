@@ -26,10 +26,10 @@ function extractProjectId(pathname: string): string | null {
 type SectionKey = Account | 'other';
 
 /** Rail sections in display order. 'other' only renders when a project lands in it. */
-const SECTIONS: readonly { key: SectionKey; label: string }[] = [
-  { key: 'personal', label: 'Personal' },
-  { key: 'work', label: 'Work' },
-  { key: 'other', label: 'Other account' },
+const SECTIONS: readonly { key: SectionKey; label: string; stripe: string }[] = [
+  { key: 'personal', label: 'Personal', stripe: 'var(--account-personal)' },
+  { key: 'work', label: 'Work', stripe: 'var(--account-work)' },
+  { key: 'other', label: 'Other account', stripe: 'var(--border-bright)' },
 ];
 
 const COLLAPSED_KEY = 'archon.console.railCollapsed';
@@ -284,7 +284,7 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
         {groups.map(g => {
           const open = filtering || !collapsed.has(g.key);
           return (
-            <div key={g.key} className="mb-2">
+            <div key={g.key} className="mb-2 border-l-2 pl-1" style={{ borderColor: g.stripe }}>
               <button
                 type="button"
                 onClick={() => {
@@ -294,7 +294,11 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
                 title={open ? `Collapse ${g.label}` : `Expand ${g.label}`}
                 className="flex w-full items-center gap-2 rounded-md px-2 pb-1 pt-2 text-left text-text-tertiary transition-colors hover:text-text-secondary"
               >
-                <span aria-hidden className="font-mono text-[10.5px] font-semibold">
+                <span
+                  aria-hidden
+                  className="font-mono text-[10.5px] font-semibold"
+                  style={{ color: g.stripe }}
+                >
                   {open ? '[-]' : '[+]'}
                 </span>
                 <span className="truncate font-mono text-[10.5px] font-semibold uppercase tracking-[0.1em]">

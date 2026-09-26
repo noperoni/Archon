@@ -81,6 +81,11 @@
   --error: oklch(0.68 0.215 18);
   --error-soft: oklch(0.68 0.215 18 / 0.14);
 
+  /* Account stripes on the project rail, one per Claude account section.
+     Kept off the status and accent hues so neither reads as a state. */
+  --account-personal: oklch(0.66 0.15 45);
+  --account-work: oklch(0.64 0.16 300);
+
   /* Node variant stripes — the builder renders all eight variants. Six tokens
      (--node-command/-prompt/-bash/-loop/-approval/-wait) inherit from the
      production :root in index.css; script and cancel exist only here
