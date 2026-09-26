@@ -1054,10 +1054,8 @@ async function dispatchOrchestratorWorkflowOwned(
   });
 
   // Validate and resolve isolation.
-  // A workflow with `worktree.enabled: false` short-circuits the resolver entirely
-  // and runs in the live checkout — no worktree creation, no env row. This is the
-  // declarative equivalent of CLI `--no-worktree` for workflows that should always
-  // run live (e.g. read-only triage, docs generation on the main checkout).
+  // Unless a workflow sets `worktree.enabled: true`, it short-circuits the resolver
+  // entirely and runs in the live checkout: no worktree creation, no env row.
   let cwd: string;
   if (adoptionLane?.kind === 'reuse-worktree') {
     // Adoption lane: the adopted run's worktree survives — run in it dirty-as-is
@@ -1076,7 +1074,12 @@ async function dispatchOrchestratorWorkflowOwned(
           'orchestrator.worker_cwd_persist_failed'
         );
       });
-  } else if (workflow.worktree?.enabled === false) {
+  } else if (workflow.worktree?.enabled !== true && adoptionLane?.kind !== 'checkout-branch') {
+    // HK47 fork: in place unless the workflow opts in with `worktree.enabled: true`
+    // (or adopts a branch, which needs a checkout of its own). A worktree is a
+    // different path, and Claude Code keys the project's memory and transcripts on
+    // the path, so a worktree run starts with none of them. Master's ruling
+    // 2026-09-26 (PERS-18): Archon runs where a terminal would.
     getLog().info(
       { workflowName: workflow.name, conversationId, codebaseId: codebase.id },
       'workflow.worktree_disabled_by_policy'

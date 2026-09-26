@@ -1945,6 +1945,7 @@ describe('workflow dispatch routing — interactive flag', () => {
         definition: makeTestWorkflow({
           name: 'test-workflow',
           interactive,
+          worktree: { enabled: true },
           ...(options.inputs ? { inputs: options.inputs } : {}),
         }),
         args: options.args ?? 'test message',
@@ -2026,6 +2027,20 @@ describe('workflow dispatch routing — interactive flag', () => {
     expect(opts.parentConversationId).toBe('conv-1-db');
     // The codebase's stored default branch rides along as the $BASE_BRANCH fallback.
     expect(opts.baseBranch).toBe('develop');
+  });
+
+  test('a workflow with no worktree policy runs in the project path, like a terminal', async () => {
+    mockGetOrCreateConversation.mockReturnValueOnce(Promise.resolve(makeDispatchConversation()));
+    mockGetCodebase.mockReturnValueOnce(Promise.resolve(makeDispatchCodebase()));
+    const result = makeWorkflowResult(true);
+    delete (result.workflow.definition as { worktree?: unknown }).worktree;
+    mockHandleCommand.mockReturnValueOnce(Promise.resolve(result));
+
+    await handleMessage(makePlatform(), 'conv-1', '/workflow run test-workflow');
+
+    expect(mockValidateAndResolveIsolation).not.toHaveBeenCalled();
+    const callArgs = mockExecuteWorkflow.mock.calls[0] as unknown[];
+    expect(callArgs[3]).toBe('/repos/test-repo');
   });
 
   // Adoption lane on the FOREGROUND dispatch (#2747 review): the background path

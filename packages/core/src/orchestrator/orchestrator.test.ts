@@ -368,7 +368,11 @@ const mockSession: Session = {
   ended_reason: null,
 };
 
-const testWorkflowDefs = makeTestWorkflowList(['fix-bug', 'add-feature', 'archon-assist']);
+// HK47 fork: workflows run in place unless they opt in (PERS-18), so these two
+// fixtures opt in to keep the isolation path under test.
+const testWorkflowDefs = makeTestWorkflowList(['fix-bug', 'add-feature', 'archon-assist']).map(w =>
+  w.name === 'archon-assist' ? w : { ...w, worktree: { enabled: true } }
+);
 const testWorkflows = testWorkflowDefs.map(w => ({
   workflow: w,
   source: 'bundled' as const,
