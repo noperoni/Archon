@@ -20,9 +20,9 @@ describe('parseClaudeSettingSources', () => {
   });
 
   test('reports unrecognized entries instead of dropping them silently', () => {
-    expect(parseClaudeSettingSources(['project', 'local'])).toEqual({
-      value: ['project'],
-      invalid: ['local'],
+    expect(parseClaudeSettingSources(['project', 'local', 'managed'])).toEqual({
+      value: ['project', 'local'],
+      invalid: ['managed'],
     });
   });
 

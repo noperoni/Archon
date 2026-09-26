@@ -112,7 +112,7 @@ export interface WorkflowConfig {
   assistants: ProviderDefaultsMap & {
     claude: {
       model?: string;
-      settingSources?: ('project' | 'user')[];
+      settingSources?: ('project' | 'user' | 'local')[];
     };
     codex: {
       model?: string;

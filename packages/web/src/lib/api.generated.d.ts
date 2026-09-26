@@ -3842,7 +3842,7 @@ export interface components {
       maxBudgetUsd?: number;
       systemPrompt?: string;
       fallbackModel?: string;
-      settingSources?: ('project' | 'user')[];
+      settingSources?: ('project' | 'user' | 'local')[];
       betas?: string[];
       sandbox?: {
         enabled?: boolean;

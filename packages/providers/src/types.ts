@@ -10,13 +10,14 @@ export interface ClaudeProviderDefaults {
   [key: string]: unknown;
   model?: string;
   /** Claude Code settingSources — controls which sources the SDK loads:
-   *  CLAUDE.md, skills, commands, agents, and hooks. Both project-level
-   *  (`<cwd>/.claude/`) and user-level (`~/.claude/`) are loaded by default.
+   *  CLAUDE.md, skills, commands, agents, and hooks. Project-level
+   *  (`<cwd>/.claude/`), user-level (`~/.claude/`) and the project's untracked
+   *  `settings.local.json` are loaded by default, as in a terminal.
    *  Set explicitly to `['project']` to scope a workflow to project-only
    *  resources (e.g. CI, shared environments).
-   *  @default ['project', 'user']
+   *  @default ['project', 'user', 'local']
    */
-  settingSources?: ('project' | 'user')[];
+  settingSources?: ('project' | 'user' | 'local')[];
   /** Absolute path to the Claude Code SDK's `cli.js`. Required in compiled
    *  Archon builds when `CLAUDE_BIN_PATH` is not set; optional in dev mode
    *  (SDK resolves from node_modules). */
@@ -625,11 +626,11 @@ export interface NodeConfig {
   /**
    * Per-node override for Claude Code settingSources — which filesystem
    * setting sources the SDK loads (CLAUDE.md, skills, commands, agents).
-   * Overrides the assistant-level default; falls back to ['project', 'user']
+   * Overrides the assistant-level default; falls back to ['project', 'user', 'local']
    * when neither is set. Claude-only; other providers ignore it (the
    * dag-executor warns via the settingSources capability axis).
    */
-  settingSources?: ('project' | 'user')[];
+  settingSources?: ('project' | 'user' | 'local')[];
   idle_timeout?: number;
   /**
    * Per-node override for Claude's `agentProgressSummaries` flag (Phase 4 of #975).

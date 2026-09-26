@@ -107,7 +107,7 @@ export interface ValidationConfig {
   assistant?: string;
   aliases?: RawAliasesConfig;
   tiers?: RawTiersConfig;
-  claudeSettingSources?: ('project' | 'user')[];
+  claudeSettingSources?: ('project' | 'user' | 'local')[];
   claudeConfigDir?: string;
 }
 
@@ -642,7 +642,7 @@ export async function validateWorkflowResources(
         const settingSources =
           'settingSources' in node && node.settingSources !== undefined
             ? node.settingSources
-            : (config?.claudeSettingSources ?? ['project', 'user']);
+            : (config?.claudeSettingSources ?? ['project', 'user', 'local']);
         const searchRoots =
           provider === 'claude'
             ? claudeSkillSearchRoots(cwd, {

@@ -22,7 +22,7 @@ function getLog(): ReturnType<typeof createLogger> {
 
 export interface ParsedSettingSources {
   /** Recognized entries, in the order given. Undefined when raw was not an array. */
-  value?: ('project' | 'user')[];
+  value?: ('project' | 'user' | 'local')[];
   /** Entries dropped because they name no known setting source. */
   invalid: string[];
 }
@@ -43,10 +43,10 @@ export interface ParsedSettingSources {
 export function parseClaudeSettingSources(raw: unknown): ParsedSettingSources {
   if (!Array.isArray(raw)) return { invalid: [] };
 
-  const value: ('project' | 'user')[] = [];
+  const value: ('project' | 'user' | 'local')[] = [];
   const invalid: string[] = [];
   for (const entry of raw) {
-    if (entry === 'project' || entry === 'user') value.push(entry);
+    if (entry === 'project' || entry === 'user' || entry === 'local') value.push(entry);
     else invalid.push(typeof entry === 'string' ? entry : JSON.stringify(entry));
   }
   return { value, invalid };
@@ -89,13 +89,16 @@ export function parseClaudeRunConfig(raw: Record<string, unknown>): ClaudeProvid
   const claudeBinaryPath = normalizeRunConfigString(raw.claudeBinaryPath, 'claudeBinaryPath');
   if (raw.settingSources !== undefined) {
     if (!Array.isArray(raw.settingSources)) {
-      invalidRunConfigValue('settingSources', "an array containing only 'project' or 'user'");
+      invalidRunConfigValue(
+        'settingSources',
+        "an array containing only 'project', 'user' or 'local'"
+      );
     }
     const invalidIndex = raw.settingSources.findIndex(
-      source => source !== 'project' && source !== 'user'
+      source => source !== 'project' && source !== 'user' && source !== 'local'
     );
     if (invalidIndex >= 0) {
-      invalidRunConfigValue(`settingSources.${invalidIndex}`, "'project' or 'user'");
+      invalidRunConfigValue(`settingSources.${invalidIndex}`, "'project', 'user' or 'local'");
     }
   }
   const parsed = parseClaudeConfig(raw);

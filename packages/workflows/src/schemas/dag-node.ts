@@ -268,10 +268,10 @@ export const dagNodeBaseSchema = z.object({
   fallbackModel: z.string().min(1).optional(),
   // Per-node override for which filesystem setting sources Claude loads
   // (CLAUDE.md, skills, commands, agents). Omitting it inherits the
-  // assistant-level default (['project', 'user'] when unset). Claude-only;
+  // assistant-level default (['project', 'user', 'local'] when unset). Claude-only;
   // other providers warn and ignore it. Lets a lean node (e.g. a reviewer)
   // skip project/user context loading for faster startup.
-  settingSources: z.array(z.enum(['project', 'user'])).optional(),
+  settingSources: z.array(z.enum(['project', 'user', 'local'])).optional(),
   betas: betasSchema.optional(),
   sandbox: sandboxSettingsSchema.optional(),
   // Opt out of resume caching: when true, this node re-runs on resume even if a

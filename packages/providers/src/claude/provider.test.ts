@@ -469,7 +469,7 @@ describe('ClaudeProvider', () => {
         options: expect.objectContaining({
           cwd: '/my/workspace',
           model: 'sonnet',
-          permissionMode: 'bypassPermissions',
+          permissionMode: 'auto',
         }),
       });
     });
@@ -1555,7 +1555,7 @@ describe('ClaudeProvider', () => {
       expect(callArgs.options.settingSources).toEqual(['project', 'user']);
     });
 
-    test('defaults settingSources to project + user when not provided', async () => {
+    test('defaults settingSources to project + user + local when not provided', async () => {
       mockQuery.mockImplementation(async function* () {
         yield { type: 'result', session_id: 'test-session' };
       });
@@ -1566,7 +1566,7 @@ describe('ClaudeProvider', () => {
 
       expect(mockQuery).toHaveBeenCalledTimes(1);
       const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
-      expect(callArgs.options.settingSources).toEqual(['project', 'user']);
+      expect(callArgs.options.settingSources).toEqual(['project', 'user', 'local']);
     });
 
     test("honors explicit settingSources: ['project'] to opt out of user scope", async () => {

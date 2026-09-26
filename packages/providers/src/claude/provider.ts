@@ -790,7 +790,7 @@ function buildBaseClaudeOptions(
   toolResultQueue: ToolResultEntry[],
   env: NodeJS.ProcessEnv,
   cliPath: string | undefined,
-  settingSources: ('project' | 'user')[]
+  settingSources: ('project' | 'user' | 'local')[]
 ): Options {
   const isJsExecutable = shouldPassNoEnvFile(cliPath);
   getLog().debug({ cliPath: cliPath ?? null, isJsExecutable }, 'claude.subprocess_env_file_flag');
@@ -836,11 +836,16 @@ function buildBaseClaudeOptions(
     ...(requestOptions?.forkSession !== undefined
       ? { forkSession: requestOptions.forkSession }
       : {}),
-    permissionMode: 'bypassPermissions',
-    allowDangerouslySkipPermissions: true,
+    // HK-47 fork, PERS-18: host runs get the mode the clp/clw terminals run in,
+    // so the auto classifier judges them and anything that would prompt reaches
+    // the console dialog (buildUserQuestionPrompt). Container runs are sandboxed
+    // and have no dialog, so they keep upstream's bypass.
+    ...(containerExecContext === undefined
+      ? { permissionMode: 'auto' as const }
+      : { permissionMode: 'bypassPermissions' as const, allowDangerouslySkipPermissions: true }),
     systemPrompt: requestOptions?.systemPrompt ?? { type: 'preset', preset: 'claude_code' },
     // Per-node override wins over the assistant-level default; the final
-    // fallback stays ['project', 'user'] (the SDK-loading default Archon ships).
+    // fallback is ['project', 'user', 'local'], what a terminal loads.
     settingSources,
     // Opt into the SDK's hook lifecycle frames so that tool-scoped hooks
     // (PreToolUse / PostToolUse / Stop / etc.) reach the workflow audit
@@ -885,35 +890,93 @@ function buildBaseClaudeOptions(
 
 /**
  * The prompt surface behind AskUserQuestion. Registering it is what makes the
- * CLI load the tool, and under bypassPermissions only tools that require a
- * human still reach it (measured, PERS-16 spike, CLI 2.1.280).
+ * CLI load the tool.
  *
- * Everything else that lands here was an `ask` from some hook: the HK-47 danger
- * gate's own failure path, for one. There is no human dialog for those, so they
- * are denied with the hook's reason: allowing would switch the gate off.
+ * HK-47 fork, PERS-18: every other tool that lands here is a permission prompt
+ * the terminal would have shown: an `ask` from the auto classifier, a settings
+ * rule, or a hook (the danger gate's own failure path, for one). It goes to the
+ * human as a two-option question over the same parked-question channel, keyed
+ * by the tool's own use id, and runs only on an explicit Allow. Dismissal,
+ * abort, free text or a broken channel all deny, so the gate is never opened
+ * by anything but a click.
  */
 export function buildUserQuestionPrompt(
   onUserQuestion: NonNullable<AgentRequestOptions['onUserQuestion']>
 ): CanUseTool {
   return async (toolName, input, ctx) => {
-    if (toolName !== 'AskUserQuestion') {
-      return {
-        behavior: 'deny',
-        message: ctx.decisionReason
-          ? `Permission required and no dialog exists for ${toolName}: ${ctx.decisionReason}`
-          : `Permission required and no dialog exists for ${toolName}.`,
-      };
-    }
+    const permission =
+      toolName === 'AskUserQuestion'
+        ? null
+        : permissionQuestion(toolName, input, ctx.decisionReason);
     let answer: Awaited<ReturnType<typeof onUserQuestion>> = null;
     try {
-      answer = await onUserQuestion({ toolUseId: ctx.toolUseID, input, signal: ctx.signal });
+      answer = await onUserQuestion({
+        toolUseId: ctx.toolUseID,
+        input: permission?.input ?? input,
+        signal: ctx.signal,
+      });
     } catch (err) {
-      getLog().warn({ err, toolUseId: ctx.toolUseID }, 'claude.user_question_failed');
+      getLog().warn({ err, toolUseId: ctx.toolUseID, toolName }, 'claude.user_question_failed');
+    }
+    if (permission !== null) {
+      const chosen = answer?.answers[permission.question];
+      if (chosen === PERMISSION_ALLOW) return { behavior: 'allow', updatedInput: input };
+      return {
+        behavior: 'deny',
+        message:
+          chosen === undefined || chosen === PERMISSION_DENY
+            ? `The user denied ${toolName}.`
+            : `The user denied ${toolName} and said: ${chosen}`,
+      };
     }
     if (answer === null) {
       return { behavior: 'deny', message: 'The question was dismissed without an answer.' };
     }
     return { behavior: 'allow', updatedInput: { ...input, ...answer } };
+  };
+}
+
+const PERMISSION_ALLOW = 'Allow';
+const PERMISSION_DENY = 'Deny';
+
+/**
+ * A tool permission prompt, shaped as AskUserQuestion input so the console's
+ * QuestionCard renders it unchanged. The subject line names what the tool would
+ * touch; the whole input rides as the preview so nothing approved is hidden.
+ * ponytail: allow-once only; the terminal's "don't ask again" would return
+ * ctx.suggestions as updatedPermissions, add it if the prompts grow tiresome.
+ */
+function permissionQuestion(
+  toolName: string,
+  input: Record<string, unknown>,
+  reason: string | undefined
+): { question: string; input: Record<string, unknown> } {
+  const subject =
+    typeof input.command === 'string'
+      ? input.command
+      : typeof input.file_path === 'string'
+        ? input.file_path
+        : typeof input.url === 'string'
+          ? input.url
+          : '';
+  const clipped = subject.length > 300 ? `${subject.slice(0, 300)}...` : subject;
+  const question = `Allow ${toolName}${clipped ? `: ${clipped}` : ''}?${reason ? ` (${reason})` : ''}`;
+  const preview = JSON.stringify(input, null, 2);
+  return {
+    question,
+    input: {
+      questions: [
+        {
+          question,
+          header: 'Permission',
+          multiSelect: false,
+          options: [
+            { label: PERMISSION_ALLOW, description: `Run this ${toolName} call once.`, preview },
+            { label: PERMISSION_DENY, description: 'Refuse it and tell the model so.', preview },
+          ],
+        },
+      ],
+    },
   };
 }
 
@@ -1498,7 +1561,7 @@ export class ClaudeProvider implements IAgentProvider {
     const settingSources =
       requestOptions?.nodeConfig?.settingSources ??
       assistantDefaults.settingSources ??
-      (['project', 'user'] as const);
+      (['project', 'user', 'local'] as const);
 
     // Apply nodeConfig translation once (deterministic, not retry-dependent)
     // We need a throwaway Options to extract warnings from applyNodeConfig,
