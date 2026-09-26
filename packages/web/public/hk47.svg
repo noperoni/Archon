@@ -1,35 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" preserveAspectRatio="xMidYMid">
-  <!-- HK-47 head mark. Drawn as one path with evenodd holes so the eye slits and
-       the grille show the surface behind them, which keeps the mark legible on
-       both light and dark panel backgrounds without needing a -light.svg twin.
-       Fill matches the Anthropic clay the agents plugin already ships, because
-       the rust of the droid's armour lands in the same place anyway. -->
-  <path fill="#D97757" fill-rule="evenodd" d="
-    M 128 14
-    C 170 14 202 44 208 88
-    L 212 132
-    C 212 170 198 198 178 222
-    L 170 240
-    L 86 240
-    L 78 222
-    C 58 198 44 170 44 132
-    L 48 88
-    C 54 44 86 14 128 14
-    Z
-
-    M 66 100  L 108 114  L 106 130  L 64 116  Z
-    M 190 100 L 148 114  L 150 130  L 192 116  Z
-
-    M 110 142 L 146 142 L 146 160 L 110 160 Z
-    M 112 170 L 144 170 L 144 188 L 112 188 Z
-    M 114 198 L 142 198 L 142 216 L 114 216 Z
-  "/>
-  <!-- Temple tabs, and the stub antenna proud of the right side of the skull.
-       Kept short and thick on purpose: a long thin spike survived the 160px
-       render and then read as a stray hair at bar size. -->
-  <path fill="#D97757" d="
-    M 210 104 L 230 98  L 230 130 L 210 136 Z
-    M 46 104  L 26 98   L 26 130  L 46 136  Z
-    M 194 54  L 222 30  L 236 46  L 208 70  Z
-  "/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="3 3 26 26" shape-rendering="crispEdges">
+  <!-- HK-47 head mark: PixelLab candidate 56 of the 2026-09-26 icon audition,
+       traced pixel for pixel into one path per colour so it stays sharp at any
+       size without image-rendering hints. The viewBox is the head's 26px
+       bounding box, squared and centred, so no margin shrinks it at 16px. -->
+  <path fill="#0C0705" d="M8 7h3v1h-3zM21 7h1v1h-1zM7 8h1v1h-1zM6 9h1v1h-1zM6 10h1v1h-1zM5 12h1v1h-1zM25 12h1v1h-1zM5 13h1v1h-1zM25 13h1v1h-1zM5 14h1v1h-1zM25 14h1v1h-1zM6 15h1v1h-1zM25 15h1v1h-1zM24 16h1v1h-1zM7 17h1v1h-1zM7 18h1v1h-1zM8 19h1v1h-1zM22 19h1v1h-1zM8 20h1v1h-1zM22 20h1v1h-1zM8 22h1v1h-1zM23 22h1v1h-1zM25 22h1v1h-1zM20 23h1v1h-1zM26 23h1v1h-1zM14 24h1v1h-1z"/>
+  <path fill="#6C3E26" d="M11 7h3v1h-3zM16 7h4v1h-4zM17 8h1v1h-1zM21 8h1v1h-1zM8 9h2v1h-2zM16 9h2v1h-2zM8 10h3v1h-3zM22 10h1v1h-1zM7 11h4v1h-4zM22 11h1v1h-1zM6 12h1v1h-1zM8 12h4v1h-4zM22 12h1v1h-1zM6 13h2v1h-2zM9 13h2v1h-2zM13 13h1v1h-1zM9 14h1v1h-1zM13 14h1v1h-1zM18 15h1v1h-1zM21 18h1v1h-1zM13 20h1v1h-1zM14 22h2v1h-2zM28 24h1v1h-1z"/>
+  <path fill="#4A2C1E" d="M14 7h1v1h-1zM22 13h1v1h-1zM21 15h1v1h-1zM13 21h1v1h-1z"/>
+  <path fill="#56311D" d="M15 7h1v1h-1zM15 8h1v1h-1zM22 9h1v1h-1zM7 10h1v1h-1zM11 11h1v1h-1zM24 13h1v1h-1zM7 14h1v1h-1zM22 14h1v1h-1zM7 15h1v1h-1zM8 16h1v1h-1zM21 16h1v1h-1zM14 17h1v1h-1zM21 17h1v1h-1zM14 18h1v1h-1z"/>
+  <path fill="#120C09" d="M20 7h1v1h-1zM22 8h1v1h-1zM23 9h1v1h-1zM25 9h1v1h-1zM5 11h2v1h-2zM25 11h1v1h-1zM6 14h1v1h-1zM24 15h1v1h-1zM7 16h1v1h-1zM18 17h1v1h-1zM18 18h1v1h-1zM9 21h1v1h-1zM9 22h4v1h-4zM13 23h1v1h-1zM25 23h1v1h-1zM15 24h1v1h-1zM20 24h1v1h-1z"/>
+  <path fill="#0D0302" d="M22 7h1v1h-1zM23 8h1v1h-1zM24 17h1v1h-1zM7 22h1v1h-1zM5 23h2v1h-2zM27 23h2v1h-2zM3 24h1v1h-1z"/>
+  <path fill="#351E14" d="M8 8h2v1h-2zM12 11h1v1h-1zM11 18h1v1h-1zM12 19h1v1h-1zM12 20h1v1h-1z"/>
+  <path fill="#41291C" d="M10 8h1v1h-1zM10 9h2v1h-2zM11 10h1v1h-1zM7 12h1v1h-1zM12 12h1v1h-1zM8 13h1v1h-1zM11 13h1v1h-1zM10 14h1v1h-1zM10 15h1v1h-1zM17 15h1v1h-1zM10 16h1v1h-1zM20 19h1v1h-1z"/>
+  <path fill="#A76237" d="M11 8h1v1h-1zM18 8h2v1h-2zM12 9h4v1h-4zM18 9h3v1h-3zM12 10h9v1h-9zM13 11h2v1h-2zM16 11h5v1h-5zM14 12h2v1h-2zM18 12h3v1h-3zM14 13h2v1h-2zM18 13h3v1h-3zM14 14h2v1h-2zM18 14h3v1h-3zM15 15h1v1h-1zM20 15h1v1h-1zM12 16h1v1h-1zM15 16h1v1h-1zM19 16h1v1h-1zM13 17h1v1h-1zM7 23h4v1h-4zM23 23h2v1h-2zM7 24h4v1h-4zM26 24h1v1h-1z"/>
+  <path fill="#8C5230" d="M12 8h3v1h-3zM16 8h1v1h-1zM20 8h1v1h-1zM21 9h1v1h-1zM21 10h1v1h-1zM23 10h1v1h-1zM21 11h1v1h-1zM23 11h1v1h-1zM13 12h1v1h-1zM21 12h1v1h-1zM23 12h1v1h-1zM21 13h1v1h-1zM23 13h1v1h-1zM21 14h1v1h-1zM23 14h1v1h-1zM23 15h1v1h-1zM14 16h1v1h-1zM20 16h1v1h-1zM22 16h1v1h-1zM20 17h1v1h-1zM22 17h1v1h-1zM13 18h1v1h-1zM22 18h1v1h-1zM11 23h1v1h-1zM21 23h2v1h-2zM5 24h2v1h-2zM11 24h1v1h-1zM21 24h1v1h-1z"/>
+  <path fill="#22140F" d="M7 9h1v1h-1zM24 9h1v1h-1zM8 17h1v1h-1zM8 18h1v1h-1zM9 19h1v1h-1zM9 20h2v1h-2zM21 20h1v1h-1zM21 21h1v1h-1zM13 22h1v1h-1zM21 22h1v1h-1zM15 23h1v1h-1zM16 24h1v1h-1z"/>
+  <path fill="#241A16" d="M24 10h1v1h-1zM24 11h1v1h-1zM24 12h1v1h-1zM18 16h1v1h-1zM9 17h2v1h-2zM9 18h2v1h-2zM10 19h2v1h-2zM11 20h1v1h-1zM19 20h1v1h-1zM11 21h2v1h-2zM19 21h1v1h-1zM6 22h1v1h-1zM16 22h1v1h-1zM19 22h1v1h-1zM17 24h3v1h-3z"/>
+  <path fill="#1A1210" d="M25 10h1v1h-1zM10 21h1v1h-1zM14 23h1v1h-1z"/>
+  <path fill="#8A9094" d="M15 11h1v1h-1zM17 13h1v1h-1zM17 14h1v1h-1z"/>
+  <path fill="#7B7875" d="M16 12h1v1h-1zM16 13h1v1h-1zM16 14h1v1h-1zM24 14h1v1h-1zM9 15h1v1h-1zM16 15h1v1h-1z"/>
+  <path fill="#9A6440" d="M17 12h1v1h-1zM16 16h2v1h-2zM23 16h1v1h-1zM12 23h1v1h-1zM12 24h2v1h-2zM22 24h1v1h-1zM25 24h1v1h-1z"/>
+  <path fill="#5E5F5C" d="M12 13h1v1h-1z"/>
+  <path fill="#744529" d="M8 14h1v1h-1zM11 14h1v1h-1zM8 15h1v1h-1zM14 15h1v1h-1zM9 16h1v1h-1zM13 19h1v1h-1zM15 20h1v1h-1zM14 21h2v1h-2zM27 24h1v1h-1z"/>
+  <path fill="#7C5B45" d="M12 14h1v1h-1z"/>
+  <path fill="#7F4829" d="M11 15h1v1h-1zM19 15h1v1h-1zM11 16h1v1h-1zM11 17h2v1h-2zM15 17h2v1h-2zM12 18h1v1h-1zM15 18h2v1h-2zM14 19h3v1h-3zM21 19h1v1h-1zM14 20h1v1h-1zM20 20h1v1h-1zM20 21h1v1h-1zM20 22h1v1h-1zM22 22h1v1h-1z"/>
+  <path fill="#CE3028" d="M12 15h2v1h-2z"/>
+  <path fill="#F94141" d="M22 15h1v1h-1zM13 16h1v1h-1z"/>
+  <path fill="#070302" d="M6 16h1v1h-1zM23 17h1v1h-1zM23 18h1v1h-1zM23 19h1v1h-1zM22 21h2v1h-2zM24 22h1v1h-1zM4 24h1v1h-1z"/>
+  <path fill="#53514C" d="M17 17h1v1h-1z"/>
+  <path fill="#383028" d="M19 17h1v1h-1zM17 18h1v1h-1zM19 18h2v1h-2zM18 19h2v1h-2zM18 22h1v1h-1z"/>
+  <path fill="#292722" d="M17 19h1v1h-1zM16 20h1v1h-1zM16 21h1v1h-1zM4 23h1v1h-1z"/>
+  <path fill="#463E37" d="M17 20h2v1h-2zM17 21h2v1h-2zM17 22h1v1h-1zM16 23h4v1h-4z"/>
+  <path fill="#B2764F" d="M23 24h2v1h-2z"/>
 </svg>
