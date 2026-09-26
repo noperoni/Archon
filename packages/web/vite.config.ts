@@ -45,7 +45,14 @@ export default defineConfig(({ mode }) => {
       ],
     },
     server: {
-      port: 5173,
+      port: 55173,
+      strictPort: true,
+      // HK-47 fork: reachable through a reverse proxy, whose hostnames come from
+      // ARCHON_ALLOWED_HOSTS in the untracked repo-root .env (comma-separated).
+      // Binding every interface is safe only behind a host firewall that admits
+      // the proxy alone to this port.
+      host: true,
+      allowedHosts: env.ARCHON_ALLOWED_HOSTS ? env.ARCHON_ALLOWED_HOSTS.split(',') : [],
       proxy: {
         '/api': {
           target: `http://localhost:${apiPort}`,

@@ -10,9 +10,13 @@ const API_PORT = (import.meta.env.VITE_API_PORT as string | undefined) ?? '3090'
  * SSE base URL. In dev, bypasses Vite proxy by connecting directly to the
  * backend (the proxy buffers SSE). In production, relative URLs (same origin).
  */
-export const SSE_BASE_URL = import.meta.env.DEV
-  ? `http://${window.location.hostname}:${API_PORT}`
-  : '';
+// Behind a reverse proxy (page not served from vite's own port) the proxy routes
+// /api straight to the server, so same-origin is correct and the raw API port is
+// not reachable from the browser at all.
+export const SSE_BASE_URL =
+  import.meta.env.DEV && window.location.port === '55173'
+    ? `http://${window.location.hostname}:${API_PORT}`
+    : '';
 
 export class HttpError extends Error {
   readonly status: number;

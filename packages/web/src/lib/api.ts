@@ -15,9 +15,13 @@ export type DagNode = components['schemas']['DagNode'];
  * Uses the page hostname so it works from any network interface.
  */
 const apiPort = (import.meta.env.VITE_API_PORT as string | undefined) ?? '3090';
-export const SSE_BASE_URL = import.meta.env.DEV
-  ? `http://${window.location.hostname}:${apiPort}`
-  : '';
+// Behind a reverse proxy (page not served from vite's own port) the proxy routes
+// /api straight to the server, so same-origin is correct and the raw API port is
+// not reachable from the browser at all.
+export const SSE_BASE_URL =
+  import.meta.env.DEV && window.location.port === '55173'
+    ? `http://${window.location.hostname}:${apiPort}`
+    : '';
 
 export { getCodebaseInput } from '@/lib/codebase-input';
 
