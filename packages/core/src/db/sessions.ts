@@ -170,6 +170,21 @@ export async function getSessionHistory(conversationId: string): Promise<readonl
 }
 
 /**
+ * HK-47 fork (PERS-18): every assistant session id already bound by a
+ * conversation of this codebase, so the console's Terminal list can leave out
+ * transcripts that already have a console conversation.
+ */
+export async function listBoundAssistantSessionIds(codebaseId: string): Promise<string[]> {
+  const result = await pool.query<{ assistant_session_id: string }>(
+    `SELECT DISTINCT s.assistant_session_id FROM remote_agent_sessions s
+     JOIN remote_agent_conversations c ON c.id = s.conversation_id
+     WHERE c.codebase_id = $1 AND s.assistant_session_id IS NOT NULL`,
+    [codebaseId]
+  );
+  return result.rows.map(r => r.assistant_session_id);
+}
+
+/**
  * Walk the session chain from a given session back to the root.
  * Returns sessions in chronological order (oldest first).
  */

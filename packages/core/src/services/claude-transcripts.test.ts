@@ -7,6 +7,7 @@ import {
   claudeProjectDir,
   claudeTranscriptPath,
   listClaudeTranscripts,
+  readTranscriptTurns,
 } from './claude-transcripts';
 
 const CWD = '/nfs/ops-center/Personal/mods/The Spotter : Dig or Die';
@@ -84,5 +85,47 @@ describe('claude transcripts', () => {
   test('refuses a session id that is not a uuid', () => {
     expect(claudeTranscriptPath(configDir, CWD, '../../etc/passwd')).toBeNull();
     expect(claudeTranscriptPath(configDir, CWD, A)).toBe(join(dir, `${A}.jsonl`));
+  });
+
+  test('reads the turns before the cut-off: prompts and text, tool traffic and meta dropped', async () => {
+    const at = (m: number): string => `2026-09-26T10:0${String(m)}:00.000Z`;
+    write(
+      A,
+      [
+        { type: 'user', uuid: 'u1', timestamp: at(0), message: { content: 'fix the gate' } },
+        { type: 'user', isMeta: true, timestamp: at(0), message: { content: 'meta noise' } },
+        {
+          type: 'assistant',
+          uuid: 'a1',
+          timestamp: at(1),
+          message: { content: [{ type: 'text', text: 'Looking.' }] },
+        },
+        {
+          type: 'assistant',
+          uuid: 'a2',
+          timestamp: at(1),
+          message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] },
+        },
+        {
+          type: 'user',
+          timestamp: at(2),
+          message: { content: [{ type: 'tool_result', content: 'out' }] },
+        },
+        {
+          type: 'assistant',
+          uuid: 'a3',
+          timestamp: at(2),
+          message: { content: [{ type: 'text', text: 'Fixed.' }] },
+        },
+        { type: 'user', timestamp: at(3), message: { content: '<command-name>/clear' } },
+        { type: 'user', uuid: 'u2', timestamp: at(5), message: { content: 'from the console' } },
+      ],
+      1000
+    );
+    const turns = await readTranscriptTurns(join(dir, `${A}.jsonl`), new Date(at(4)));
+    expect(turns.map(t => [t.id, t.role, t.content])).toEqual([
+      ['u1', 'user', 'fix the gate'],
+      ['a1', 'assistant', 'Looking.\n\nFixed.'],
+    ]);
   });
 });

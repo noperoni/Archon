@@ -266,7 +266,11 @@ import * as isolationEnvDb from '@archon/core/db/isolation-environments';
 import * as workflowDb from '@archon/core/db/workflows';
 import * as workflowEventDb from '@archon/core/db/workflow-events';
 import * as messageDb from '@archon/core/db/messages';
-import { createSession } from '@archon/core/db/sessions';
+import {
+  createSession,
+  getSessionHistory,
+  listBoundAssistantSessionIds,
+} from '@archon/core/db/sessions';
 import * as userDb from '@archon/core/db/users';
 import {
   abandonWorkflow,
@@ -336,6 +340,7 @@ import {
 import {
   claudeTranscriptPath,
   listClaudeTranscripts,
+  readTranscriptTurns,
 } from '@archon/core/services/claude-transcripts';
 import {
   updateAssistantConfigBodySchema,
@@ -2992,7 +2997,9 @@ export function registerApiRoutes(
           user_id: null,
           created_at: now,
         }));
-      return c.json([...messages, ...pending].map(toApiMessage));
+      // Earlier history only belongs at the front when the window reaches it.
+      const earlier = messages.length < limit ? await terminalHistory(conv) : [];
+      return c.json([...earlier, ...messages, ...pending].map(toApiMessage));
     } catch (error) {
       getLog().error({ err: error }, 'list_messages_failed');
       return apiError(c, 500, 'Failed to list messages');
@@ -3380,16 +3387,70 @@ export function registerApiRoutes(
     return envVars.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
   }
 
-  // GET /api/codebases/:id/claude-sessions - the project's terminal transcripts
+  /**
+   * HK-47 fork (PERS-18): the terminal turns a resumed conversation continues
+   * from, read in place from the transcript up to the moment the console
+   * conversation was created. A conversation born in the console has no turns
+   * before its own creation, so this is empty for it without any marker.
+   */
+  async function terminalHistory(conv: {
+    id: string;
+    codebase_id: string | null;
+    created_at: string | Date;
+  }): Promise<MessageRow[]> {
+    if (!conv.codebase_id) return [];
+    try {
+      const history = await getSessionHistory(conv.id);
+      const first = [...history].reverse().find(s => s.assistant_session_id);
+      if (!first?.assistant_session_id) return [];
+      const codebase = await codebaseDb.getCodebase(conv.codebase_id);
+      if (!codebase) return [];
+      const path = claudeTranscriptPath(
+        await claudeConfigDirOf(conv.codebase_id),
+        codebase.default_cwd,
+        first.assistant_session_id
+      );
+      if (!path || !existsSync(path)) return [];
+      // SQLite stores `YYYY-MM-DD HH:MM:SS` in UTC with no zone; Postgres hands back a Date.
+      const created =
+        conv.created_at instanceof Date
+          ? conv.created_at
+          : new Date(
+              /[zZ]|[+-]\d\d:?\d\d$/.test(conv.created_at)
+                ? conv.created_at
+                : `${conv.created_at.replace(' ', 'T')}Z`
+            );
+      if (Number.isNaN(created.getTime())) return [];
+      const turns = await readTranscriptTurns(path, created);
+      return turns.map(t => ({
+        id: `terminal-${t.id}`,
+        conversation_id: conv.id,
+        role: t.role,
+        content: t.content,
+        metadata: JSON.stringify({ source: 'terminal' }),
+        user_id: null,
+        created_at: t.timestamp,
+      }));
+    } catch (error) {
+      getLog().warn({ err: error, conversationId: conv.id }, 'terminal_history_failed');
+      return [];
+    }
+  }
+
+  // GET /api/codebases/:id/claude-sessions - the project's terminal transcripts,
+  // less those a console conversation of this project has already bound (they
+  // live in the Console list, and resuming one again would fork a second copy).
   registerOpenApiRoute(listClaudeSessionsRoute, async c => {
     const id = c.req.param('id') ?? '';
     try {
       const codebase = await codebaseDb.getCodebase(id);
       if (!codebase) return apiError(c, 404, 'Codebase not found');
-      const sessions = await listClaudeTranscripts(
-        await claudeConfigDirOf(id),
-        codebase.default_cwd
-      );
+      const [transcripts, bound] = await Promise.all([
+        listClaudeTranscripts(await claudeConfigDirOf(id), codebase.default_cwd),
+        listBoundAssistantSessionIds(id),
+      ]);
+      const taken = new Set(bound);
+      const sessions = transcripts.filter(t => !taken.has(t.sessionId));
       return c.json({ sessions });
     } catch (error) {
       getLog().error({ err: error, codebaseId: id }, 'list_claude_sessions_failed');

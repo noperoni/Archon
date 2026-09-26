@@ -4,7 +4,7 @@
  * (PERS-18): lets a project's terminal conversations be resumed from the console,
  * read in place and never copied.
  */
-import { open, readdir, stat } from 'node:fs/promises';
+import { open, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export interface ClaudeTranscript {
@@ -112,6 +112,79 @@ async function describe(path: string, sessionId: string): Promise<ClaudeTranscri
   // A file with neither is a session that never got a prompt: nothing to resume.
   if (!title) return null;
   return { sessionId, title, lastActivity: info.mtime.toISOString(), sizeBytes: info.size };
+}
+
+export interface TranscriptTurn {
+  /** The transcript line's own uuid, stable across reads. */
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  /** ISO 8601. */
+  timestamp: string;
+}
+
+/** The text a line carries, or null for tool traffic, meta and command wrappers. */
+function turnText(line: Record<string, unknown>): string | null {
+  const content = (line.message as { content?: unknown } | undefined)?.content;
+  const text =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? (content as { type?: string; text?: string }[])
+            .filter(p => p.type === 'text' && typeof p.text === 'string')
+            .map(p => p.text)
+            .join('\n')
+        : '';
+  if (!text.trim()) return null;
+  if (line.type === 'user' && text.trimStart().startsWith('<')) return null;
+  return text.trim();
+}
+
+const turnCache = new Map<string, TranscriptTurn[]>();
+const TURN_CACHE_MAX = 32;
+
+/**
+ * The conversation a transcript held before `before`: the user's prompts and
+ * the assistant's text, consecutive assistant lines merged into one turn.
+ * Everything earlier than `before` is history the file will never rewrite, so
+ * the result is cached per path and cut-off.
+ * ponytail: FIFO cache of 32 cut-offs; a real LRU if many resumed conversations
+ * are open at once.
+ */
+export async function readTranscriptTurns(path: string, before: Date): Promise<TranscriptTurn[]> {
+  const key = `${path}|${before.toISOString()}`;
+  const cached = turnCache.get(key);
+  if (cached) return cached;
+
+  const turns: TranscriptTurn[] = [];
+  for (const line of parseLines(await readFile(path, 'utf8'))) {
+    if (line.type !== 'user' && line.type !== 'assistant') continue;
+    if (line.isMeta === true || line.isSidechain === true) continue;
+    const at = typeof line.timestamp === 'string' ? new Date(line.timestamp) : null;
+    if (!at || Number.isNaN(at.getTime())) continue;
+    if (at >= before) break;
+    const text = turnText(line);
+    if (text === null) continue;
+    const role = line.type;
+    const last = turns[turns.length - 1];
+    if (role === 'assistant' && last?.role === 'assistant') {
+      last.content += `\n\n${text}`;
+      continue;
+    }
+    turns.push({
+      id: typeof line.uuid === 'string' ? line.uuid : String(turns.length),
+      role,
+      content: text,
+      timestamp: at.toISOString(),
+    });
+  }
+
+  if (turnCache.size >= TURN_CACHE_MAX) {
+    const oldest = turnCache.keys().next().value;
+    if (oldest !== undefined) turnCache.delete(oldest);
+  }
+  turnCache.set(key, turns);
+  return turns;
 }
 
 /** A project's transcripts, most recent first. Missing directory means none. */
