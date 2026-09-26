@@ -190,7 +190,7 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
       <div className="px-3.5 pb-2.5 pt-4">
         <div className="flex items-center gap-2.5 px-1 pb-4">
           <img
-            src="/favicon.png"
+            src="/hk47.svg"
             alt=""
             aria-hidden="true"
             width={22}
@@ -198,7 +198,7 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
             className="shrink-0 select-none"
             draggable={false}
           />
-          <span className="brand-text text-base font-semibold tracking-tight">Archon</span>
+          <span className="brand-text text-base font-semibold tracking-tight">HK-47</span>
           <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-text-tertiary">
             console
           </span>
