@@ -93,43 +93,87 @@ async function renderMermaid(el: HTMLElement, source: string): Promise<() => voi
   };
 }
 
-async function renderVega(el: HTMLElement, source: string): Promise<() => void> {
-  const spec = JSON.parse(source) as Record<string, unknown>;
+/** Categorical slots in fixed order, validated for CVD separation on the dark
+ * surface (dataviz validate_palette.js, 2026-09-27). Status colours are never
+ * series colours, so warning and error are deliberately absent. */
+const CATEGORY_TOKENS = [
+  '--chart-1',
+  '--chart-2',
+  '--chart-3',
+  '--chart-4',
+  '--chart-5',
+  '--chart-6',
+];
+
+async function renderVegaSpec(el: HTMLElement, spec: Record<string, unknown>): Promise<() => void> {
   const { default: embed } = await import('vega-embed');
   const token = (name: string): string => tokenIn(name, el);
   const text = token('--text-secondary');
   const grid = token('--border');
+  const surface = token('--surface-inset');
   const result = await embed(el, spec, {
     actions: false,
     renderer: 'svg',
+    tooltip: { theme: 'dark' },
     config: {
       background: 'transparent',
-      mark: { color: token('--accent') },
-      range: {
-        category: [
-          '--accent',
-          '--brand-teal',
-          '--brand-violet',
-          '--warning',
-          '--error',
-          '--running',
-        ].map(token),
-      },
+      font: getComputedStyle(document.body).fontFamily,
+      mark: { color: token('--chart-1'), tooltip: true },
+      bar: { cornerRadiusEnd: 4, stroke: surface, strokeWidth: 1 },
+      line: { strokeWidth: 2 },
+      point: { size: 64 },
+      range: { category: CATEGORY_TOKENS.map(token) },
       axis: {
         labelColor: text,
         titleColor: text,
         gridColor: grid,
         domainColor: grid,
         tickColor: grid,
+        labelFontSize: 11,
+        titleFontSize: 11,
+        titleFontWeight: 'normal',
       },
-      legend: { labelColor: text, titleColor: text },
-      title: { color: token('--text-primary') },
+      legend: { labelColor: text, titleColor: text, orient: 'top', symbolType: 'circle' },
+      title: { color: token('--text-primary'), anchor: 'start', fontSize: 13, fontWeight: 600 },
       view: { stroke: 'transparent' },
     },
   });
   return () => {
     result.finalize();
   };
+}
+
+async function renderVega(el: HTMLElement, source: string): Promise<() => void> {
+  return renderVegaSpec(el, JSON.parse(source) as Record<string, unknown>);
+}
+
+/** A vega-lite spec rendered in the livery, for pages that build charts from data. */
+export function VegaChart({ spec }: { spec: Record<string, unknown> }): ReactElement {
+  const ref = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+    renderVegaSpec(el, spec)
+      .then(done => {
+        if (cancelled) done();
+        else cleanup = done;
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setFailed(e instanceof Error ? e.message : String(e));
+      });
+    return (): void => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [spec]);
+  return failed ? (
+    <p className="text-[12px] text-text-tertiary">Chart failed: {failed}</p>
+  ) : (
+    <div ref={ref} className="w-full [&_svg]:max-w-full" />
+  );
 }
 
 function Graphic({

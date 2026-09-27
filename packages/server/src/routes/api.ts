@@ -283,6 +283,10 @@ import {
 import { getAuth, isWebAuthEnabled, getSignupMode, isApiGateEnabled } from '../auth';
 import { errorSchema } from './schemas/common.schemas';
 import { updateCheckResponseSchema } from './schemas/system.schemas';
+import { metricsQuerySchema, metricsResponseSchema } from './schemas/metrics.schemas';
+import { buildMetrics, defaultConfigDirs, defaultQueueDir, type Range } from '../metrics/metrics';
+import { TranscriptIndex } from '../metrics/transcript-index';
+import { archonSources } from '../metrics/archon-sources';
 import {
   workflowListResponseSchema,
   validateWorkflowBodySchema,
@@ -476,6 +480,22 @@ const cwdQuerySchema = z.object({ cwd: z.string().optional() });
 const workflowTargetQuerySchema = cwdQuerySchema.extend({
   source: z.enum(['project', 'global']).optional(),
 });
+
+const getMetricsRoute = createRoute({
+  method: 'get',
+  path: '/api/hk47/metrics',
+  tags: ['System'],
+  summary: 'Token, cost, session, workflow, gate and queue metrics across every Claude account',
+  request: { query: metricsQuerySchema },
+  responses: {
+    200: { content: { 'application/json': { schema: metricsResponseSchema } }, description: 'OK' },
+    500: jsonError('Server error'),
+  },
+});
+
+// ponytail: the first refresh parses every transcript on the event loop (tens of
+// seconds, once); move it to a Worker if a cold start ever blocks something that matters.
+let metricsIndex: TranscriptIndex | null = null;
 
 const getWorkflowsRoute = createRoute({
   method: 'get',
@@ -3564,6 +3584,28 @@ export function registerApiRoutes(
   // =========================================================================
   // Workflow endpoints
   // =========================================================================
+
+  // GET /api/hk47/metrics - the console's Metrics page (PERS-14)
+  registerOpenApiRoute(getMetricsRoute, async c => {
+    try {
+      metricsIndex ??= new TranscriptIndex(join(getArchonHome(), 'hk47-metrics.db'));
+      const range = (c.req.query('range') ?? '30') as Range;
+      const account = c.req.query('account') || null;
+      const report = await buildMetrics(
+        {
+          configDirs: defaultConfigDirs(),
+          queueDir: defaultQueueDir(),
+          archon: archonSources,
+          index: metricsIndex,
+        },
+        range,
+        account
+      );
+      return c.json(report, 200);
+    } catch (error) {
+      return apiError(c, 500, `Metrics failed: ${(error as Error).message}`);
+    }
+  });
 
   // GET /api/workflows - Discover available workflows
   registerOpenApiRoute(getWorkflowsRoute, async c => {

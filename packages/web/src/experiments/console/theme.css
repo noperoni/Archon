@@ -89,6 +89,16 @@
   --account-personal: oklch(0.66 0.15 45);
   --account-work: oklch(0.64 0.16 300);
 
+  /* Chart categorical slots, fixed order (PERS-14). Slot 1 is the accent; the
+     six pass the dataviz validator on the dark surface (worst adjacent CVD
+     delta E 8.3). Never cycled: a seventh series folds into Other. */
+  --chart-1: oklch(0.66 0.125 52);
+  --chart-2: oklch(0.66 0.12 165);
+  --chart-3: oklch(0.62 0.16 300);
+  --chart-4: oklch(0.66 0.12 95);
+  --chart-5: oklch(0.64 0.13 245);
+  --chart-6: oklch(0.62 0.14 345);
+
   /* Node variant stripes — the builder renders all eight variants. Six tokens
      (--node-command/-prompt/-bash/-loop/-approval/-wait) inherit from the
      production :root in index.css; script and cancel exist only here

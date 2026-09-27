@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router';
-import { Settings, Workflow, ArrowLeft, PenTool, type LucideIcon } from 'lucide-react';
+import { Settings, Workflow, ArrowLeft, PenTool, BarChart3, type LucideIcon } from 'lucide-react';
 import { ProjectRow } from './ProjectRow';
 import { EnvVarsDialog } from './EnvVarsDialog';
 import { useEntity, invalidate } from '../store/cache';
@@ -361,6 +361,12 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
           label="Workflow Builder"
           title="Visual workflow builder (beta)"
           badge="beta"
+        />
+        <RailNavLink
+          to="/console/metrics"
+          icon={BarChart3}
+          label="Metrics"
+          title="Tokens, cost, sessions, workflows, gate and queue"
         />
         <RailNavLink
           to="/console/settings"

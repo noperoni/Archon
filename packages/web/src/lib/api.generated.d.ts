@@ -1490,6 +1490,110 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/codebases/{id}/claude-sessions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the project's Claude Code transcripts, most recent first */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Transcripts for the project */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['ClaudeSessionListResponse'];
+          };
+        };
+        /** @description Codebase not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/codebases/{id}/claude-sessions/{sessionId}/resume': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Open a Claude Code transcript as a web conversation that resumes it */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          sessionId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Conversation seeded to resume the session */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['CreateConversationResponse'];
+          };
+        };
+        /** @description Bad request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Codebase or transcript not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/codebases/{id}/env/{key}': {
     parameters: {
       query?: never;
@@ -1533,6 +1637,54 @@ export interface paths {
         };
       };
     };
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/hk47/metrics': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Token, cost, session, workflow, gate and queue metrics across every Claude account */
+    get: {
+      parameters: {
+        query?: {
+          range?: '7' | '30' | '90' | 'all';
+          account?: string;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['MetricsResponse'];
+          };
+        };
+        /** @description Server error */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -3523,12 +3675,128 @@ export interface components {
     CodebaseEnvVarsResponse: {
       keys: string[];
     };
+    ClaudeSessionListResponse: {
+      sessions: {
+        sessionId: string;
+        title: string;
+        lastActivity: string;
+        sizeBytes: number;
+      }[];
+    };
     EnvVarMutationResponse: {
       success: boolean;
     };
     SetEnvVarBody: {
       key: string;
       value: string;
+    };
+    MetricsResponse: {
+      /** @enum {string} */
+      range: '7' | '30' | '90' | 'all';
+      account: string | null;
+      since: string | null;
+      today: string;
+      indexedFiles: number;
+      reparsedFiles: number;
+      accounts: string[];
+      unpricedModels: string[];
+      totals: {
+        tokens: number;
+        input: number;
+        output: number;
+        thinking: number;
+        cacheRead: number;
+        cacheWrite: number;
+        costUsd: number;
+        messages: number;
+        sessions: number;
+        turns: number;
+        cacheHitRatio: number;
+        webSearches: number;
+        webFetches: number;
+        workflowRuns: number;
+        gateStops: number;
+        queueWaits: number;
+      };
+      daily: {
+        day: string;
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheWrite5m: number;
+        cacheWrite1h: number;
+        costUsd: number;
+        sessions: number;
+        turns: number;
+        cacheHitRatio: number;
+      }[];
+      byProject: {
+        project: string;
+        tokens: number;
+        costUsd: number;
+        sessions: number;
+      }[];
+      byModel: {
+        model: string;
+        tokens: number;
+        costUsd: number;
+        messages: number;
+      }[];
+      byAccount: {
+        account: string;
+        tokens: number;
+        costUsd: number;
+        sessions: number;
+      }[];
+      byOrigin: {
+        origin: string;
+        tokens: number;
+        sessions: number;
+      }[];
+      bySidechain: {
+        kind: string;
+        tokens: number;
+        messages: number;
+      }[];
+      tools: {
+        tool: string;
+        calls: number;
+      }[];
+      workflows: {
+        runs: {
+          id: string;
+          name: string;
+          status: string;
+          startedAt: string;
+          durationMs: number | null;
+          costUsd: number;
+          tokens: number;
+        }[];
+        byStatus: {
+          status: string;
+          count: number;
+        }[];
+      };
+      gate: {
+        daily: {
+          day: string;
+          verdict: string;
+          count: number;
+        }[];
+        rules: {
+          rule: string;
+          count: number;
+        }[];
+      };
+      queue: {
+        daily: {
+          day: string;
+          flag: string;
+          count: number;
+        }[];
+        picks: number;
+        pickedAtHead: number;
+      };
     };
     WorkflowListResponse: {
       workflows: components['schemas']['WorkflowListEntry'][];

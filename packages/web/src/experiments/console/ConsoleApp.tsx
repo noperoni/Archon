@@ -9,6 +9,7 @@ import { RunsPage } from './routes/RunsPage';
 import { RunDetailPage } from './routes/RunDetailPage';
 import { ChatPage } from './routes/ChatPage';
 import { PreviewPage } from './routes/PreviewPage';
+import { MetricsPage } from './routes/MetricsPage';
 import { SettingsPage } from './routes/SettingsPage';
 import { invalidate } from './store/cache';
 import { K } from './store/keys';
@@ -74,6 +75,7 @@ export function ConsoleApp(): ReactElement {
           <Routes>
             <Route index element={<RunsPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="metrics" element={<MetricsPage />} />
             <Route path="builder" element={<BuilderConnected />} />
             <Route path="builder/:name" element={<BuilderConnected />} />
             <Route path="_preview" element={<PreviewPage />} />
