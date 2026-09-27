@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
+import { GRAPHIC_COMPONENTS } from './FencedGraphic';
 import { AgentAvatar } from './AgentAvatar';
 import { formatClock } from '../lib/format';
 import type { Message } from '../primitives/message';
@@ -17,6 +18,7 @@ interface MessageItemProps {
 }
 
 const MD_COMPONENTS: Components = {
+  ...GRAPHIC_COMPONENTS,
   a: ({ href, children }) => (
     <a
       href={href}

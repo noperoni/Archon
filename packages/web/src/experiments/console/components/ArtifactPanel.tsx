@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
+import { GRAPHIC_COMPONENTS } from './FencedGraphic';
 import { useEntity } from '../store/cache';
 import { K } from '../store/keys';
 import * as skill from '../skills';
@@ -213,7 +214,11 @@ function ArtifactViewer({ runId, path }: ViewerProps): ReactElement {
           <p className="font-mono text-[12px] text-error">{error}</p>
         ) : content === null ? null : isMarkdown ? (
           <div className="chat-markdown max-w-[820px] text-[13px] leading-relaxed text-text-primary">
-            <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>
+            <ReactMarkdown
+              remarkPlugins={REMARK_PLUGINS}
+              rehypePlugins={REHYPE_PLUGINS}
+              components={GRAPHIC_COMPONENTS}
+            >
               {content}
             </ReactMarkdown>
           </div>
