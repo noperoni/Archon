@@ -493,8 +493,10 @@ const getMetricsRoute = createRoute({
   },
 });
 
-// ponytail: the first refresh parses every transcript on the event loop (tens of
-// seconds, once); move it to a Worker if a cold start ever blocks something that matters.
+// ponytail: the first refresh parses every transcript on the event loop (3.0s for
+// 379 files / 567MB, measured 2026-09-27). The index persists in ~/.archon, so that
+// cost recurs only on a schema bump; a warm request is ~45ms. Move it to a Worker
+// if a cold start ever blocks something that matters.
 let metricsIndex: TranscriptIndex | null = null;
 
 const getWorkflowsRoute = createRoute({
