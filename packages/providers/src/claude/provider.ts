@@ -918,8 +918,21 @@ export function buildUserQuestionPrompt(
     } catch (err) {
       getLog().warn({ err, toolUseId: ctx.toolUseID, toolName }, 'claude.user_question_failed');
     }
+    // Dismissed (the console's Dismiss, or a new message sent over the card):
+    // refuse and have the model end its turn, so the conversation lock frees and
+    // whatever the user typed next runs. Not `interrupt: true`, the terminal's
+    // Esc: through the SDK that ends as error_during_execution, which the
+    // orchestrator reads as a stale session and discards, so the next message
+    // would reach a session with no memory of this one.
+    if (answer === null) {
+      return {
+        behavior: 'deny',
+        message:
+          'The user dismissed this without answering. End your turn now: no further tool calls and no more than one short sentence. Their next message follows.',
+      };
+    }
     if (permission !== null) {
-      const chosen = answer?.answers[permission.question];
+      const chosen = answer.answers[permission.question];
       if (chosen === PERMISSION_ALLOW) return { behavior: 'allow', updatedInput: input };
       return {
         behavior: 'deny',
@@ -928,9 +941,6 @@ export function buildUserQuestionPrompt(
             ? `The user denied ${toolName}.`
             : `The user denied ${toolName} and said: ${chosen}`,
       };
-    }
-    if (answer === null) {
-      return { behavior: 'deny', message: 'The question was dismissed without an answer.' };
     }
     return { behavior: 'allow', updatedInput: { ...input, ...answer } };
   };

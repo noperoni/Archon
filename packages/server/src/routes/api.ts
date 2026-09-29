@@ -796,6 +796,21 @@ const answerQuestionRoute = createRoute({
   },
 });
 
+const dismissQuestionRoute = createRoute({
+  method: 'post',
+  path: '/api/conversations/{id}/questions/{toolUseId}/dismiss',
+  tags: ['Conversations'],
+  summary: "Dismiss a pending AskUserQuestion, as the terminal's Esc does",
+  request: { params: questionAnswerParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: successResponseSchema } },
+      description: 'Dismissed; the tool is refused and the turn ends',
+    },
+    404: jsonError('No question pending under that id in this conversation'),
+  },
+});
+
 // =========================================================================
 // Codebase route configs
 // =========================================================================
@@ -2998,6 +3013,14 @@ export function registerApiRoutes(
     const toolUseId = c.req.param('toolUseId') ?? '';
     const answer = getValidatedBody(c, questionAnswerBodySchema);
     if (!answerQuestion(conversationId, toolUseId, answer)) {
+      return apiError(c, 404, 'No question pending under that id in this conversation');
+    }
+    return c.json({ success: true });
+  });
+
+  // POST /api/conversations/:id/questions/:toolUseId/dismiss - Refuse a parked question
+  registerOpenApiRoute(dismissQuestionRoute, c => {
+    if (!answerQuestion(c.req.param('id') ?? '', c.req.param('toolUseId') ?? '', null)) {
       return apiError(c, 404, 'No question pending under that id in this conversation');
     }
     return c.json({ success: true });

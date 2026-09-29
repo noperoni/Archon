@@ -35,3 +35,11 @@ export async function answerQuestion(
     { method: 'POST', body: JSON.stringify({ answers }) }
   );
 }
+
+/** Refuse a pending question and end its turn, as the terminal's Esc does. */
+export async function dismissQuestion(conversationId: string, toolUseId: string): Promise<void> {
+  await requestJson<{ success: boolean }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/questions/${encodeURIComponent(toolUseId)}/dismiss`,
+    { method: 'POST' }
+  );
+}

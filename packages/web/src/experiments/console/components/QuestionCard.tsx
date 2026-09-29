@@ -17,6 +17,7 @@ interface Question {
 interface QuestionCardProps {
   pending: PendingQuestion;
   onAnswer: (answers: Record<string, string>) => Promise<void>;
+  onDismiss: () => Promise<void>;
 }
 
 // The tool input is untrusted JSON from the model; anything malformed is dropped
@@ -58,7 +59,11 @@ function readQuestions(input: Record<string, unknown>): Question[] {
  * offers. Submitting sends every question's answer at once, keyed by question
  * text, which is the shape Claude Code and the HK-47 gate's answer hook read.
  */
-export function QuestionCard({ pending, onAnswer }: QuestionCardProps): ReactElement | null {
+export function QuestionCard({
+  pending,
+  onAnswer,
+  onDismiss,
+}: QuestionCardProps): ReactElement | null {
   const questions = readQuestions(pending.input);
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, string>>({});
@@ -95,6 +100,15 @@ export function QuestionCard({ pending, onAnswer }: QuestionCardProps): ReactEle
     const answers = Object.fromEntries(questions.map(q => [q.question, answerFor(q)]));
     onAnswer(answers).catch((e: unknown) => {
       setError(e instanceof Error ? e.message : 'Answer failed.');
+      setSending(false);
+    });
+  };
+
+  const dismiss = (): void => {
+    setSending(true);
+    setError(null);
+    onDismiss().catch((e: unknown) => {
+      setError(e instanceof Error ? e.message : 'Dismiss failed.');
       setSending(false);
     });
   };
@@ -172,6 +186,15 @@ export function QuestionCard({ pending, onAnswer }: QuestionCardProps): ReactEle
           className="rounded border border-success/40 bg-success/15 px-3 py-1 text-[12px] font-medium text-success transition-colors hover:bg-success/25 disabled:opacity-50"
         >
           {sending ? 'Sending…' : 'Answer'}
+        </button>
+        <button
+          type="button"
+          onClick={dismiss}
+          disabled={sending}
+          title="Refuse the question and end the turn, as Esc does in the terminal"
+          className="rounded border border-border px-3 py-1 text-[12px] text-text-secondary transition-colors hover:border-border-bright hover:text-text-primary disabled:opacity-50"
+        >
+          Dismiss
         </button>
         {error !== null ? <span className="text-[12px] text-error">{error}</span> : null}
       </div>

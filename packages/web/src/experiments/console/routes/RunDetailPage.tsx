@@ -515,6 +515,10 @@ export function RunDetailPage(): ReactElement {
                               );
                               invalidate(K.questions(conversationPlatformId));
                             }}
+                            onDismiss={async (): Promise<void> => {
+                              await skill.dismissQuestion(conversationPlatformId, q.toolUseId);
+                              invalidate(K.questions(conversationPlatformId));
+                            }}
                           />
                         ))
                       : null}

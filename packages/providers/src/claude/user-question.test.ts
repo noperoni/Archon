@@ -27,7 +27,14 @@ describe('buildUserQuestionPrompt', () => {
 
   test('denies when the question is dismissed or the handler throws', async () => {
     const dismissed = buildUserQuestionPrompt(async () => null);
-    expect((await dismissed('AskUserQuestion', input, ctx()))?.behavior).toBe('deny');
+    // Refused with an order to end the turn, never interrupted: an interrupt
+    // ends as error_during_execution and the orchestrator discards the session.
+    for (const tool of ['AskUserQuestion', 'Bash']) {
+      const result = await dismissed(tool, tool === 'Bash' ? { command: 'ls' } : input, ctx());
+      expect(result?.behavior).toBe('deny');
+      expect(result?.behavior === 'deny' && result.interrupt).toBeFalsy();
+      expect(result?.behavior === 'deny' && result.message).toContain('End your turn');
+    }
     const broken = buildUserQuestionPrompt(async () => {
       throw new Error('boom');
     });

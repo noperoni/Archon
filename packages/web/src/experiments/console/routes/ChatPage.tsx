@@ -60,10 +60,22 @@ export function ChatPage(): ReactElement {
   );
 
   // The project's terminal transcripts, resumable here (HK47 fork, PERS-18).
-  const { data: claudeSessions } = useEntity<ClaudeSession[]>(
+  const { data: claudeSessions, error: claudeSessionsError } = useEntity<ClaudeSession[]>(
     projectId !== undefined ? K.claudeSessions(projectId) : 'noop:no-project-sessions',
     () => (projectId !== undefined ? skill.listClaudeSessions(projectId) : Promise.resolve([]))
   );
+  // A fetch that lands mid server reload fails, and nothing else refetches the
+  // list until a transcript is written, so the project reads as having no
+  // history. Retry instead.
+  useEffect(() => {
+    if (projectId === undefined || claudeSessionsError === undefined) return;
+    const id = setTimeout(() => {
+      invalidate(K.claudeSessions(projectId));
+    }, 3000);
+    return (): void => {
+      clearTimeout(id);
+    };
+  }, [projectId, claudeSessionsError]);
 
   // Active conversation: most-recent web conversation, else null until first send.
   // `picked` stops that default from overriding an explicit "New conversation".
@@ -266,6 +278,16 @@ export function ChatPage(): ReactElement {
             );
           }
         } else {
+          // A message sent over this turn's own question is the terminal's Esc
+          // then a new prompt: without the dismissal the turn stays parked on
+          // the question and the message waits in the lock queue unseen. A
+          // workflow run's question is left alone; its node is not this turn.
+          await Promise.all(
+            (questions ?? [])
+              .filter(q => !q.fromRun)
+              .map(q => skill.dismissQuestion(activeConvId, q.toolUseId).catch(() => undefined))
+          );
+          invalidate(K.questions(activeConvId));
           await skill.sendMessage(activeConvId, text, files);
           invalidate(K.messages(activeConvId));
         }
@@ -385,7 +407,31 @@ export function ChatPage(): ReactElement {
             {messageList.length === 0 && !busy ? (
               <EmptyState
                 title="No messages yet."
-                hint="Ask the agent about this project, or tell it what to run."
+                hint={
+                  activeConvId === null && timeline.length > 0
+                    ? 'Start a new conversation, or pick up an earlier one.'
+                    : 'Ask the agent about this project, or tell it what to run.'
+                }
+                // A project with only terminal history opens on a new conversation,
+                // and the picker alone reads as "no history": offer it here.
+                action={
+                  activeConvId === null && timeline.length > 0 ? (
+                    <div className="flex flex-col items-stretch gap-1.5">
+                      {timeline.slice(0, 6).map(item => (
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => {
+                            onPick(item.value);
+                          }}
+                          className="max-w-[520px] truncate rounded border border-border bg-surface-elevated px-3 py-1.5 text-left text-xs text-text-secondary transition-colors hover:border-border-bright hover:text-text-primary"
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : undefined
+                }
               />
             ) : (
               <StreamContextProvider value={{ runStartedAt: null }}>
@@ -424,6 +470,11 @@ export function ChatPage(): ReactElement {
               pending={q}
               onAnswer={async (answers): Promise<void> => {
                 await skill.answerQuestion(activeConvId, q.toolUseId, answers);
+                invalidate(K.questions(activeConvId));
+                invalidate(K.messages(activeConvId));
+              }}
+              onDismiss={async (): Promise<void> => {
+                await skill.dismissQuestion(activeConvId, q.toolUseId);
                 invalidate(K.questions(activeConvId));
                 invalidate(K.messages(activeConvId));
               }}
