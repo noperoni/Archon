@@ -43,3 +43,19 @@ export async function dismissQuestion(conversationId: string, toolUseId: string)
     { method: 'POST' }
   );
 }
+
+/** Context and notional cost of a conversation's Claude session (HK47 fork). */
+export interface ConversationUsage {
+  sessionId: string;
+  model: string | null;
+  contextTokens: number;
+  costUsd: number;
+  unpriced: number;
+}
+
+export async function getUsage(conversationId: string): Promise<ConversationUsage | null> {
+  const res = await requestJson<{ usage: ConversationUsage | null }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/usage`
+  );
+  return res.usage;
+}

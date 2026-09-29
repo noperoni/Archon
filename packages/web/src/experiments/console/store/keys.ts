@@ -24,6 +24,8 @@ export const K = {
   conversations: (projectId: string): string => `conversations:${projectId}`,
   claudeSessions: (projectId: string): string => `claudeSessions:${projectId}`,
   commands: (projectId: string): string => `commands:${projectId}`,
+  usage: (conversationId: string): string => `usage:${conversationId}`,
+  subagents: (projectId: string): string => `subagents:${projectId}`,
   countsGlobal: 'counts:global' as const,
   pendingRuns: 'pendingRuns' as const,
   envVars: (projectId: string): string => `envVars:${projectId}`,

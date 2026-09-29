@@ -95,6 +95,21 @@ export const questionAnswerBodySchema = z
   .strict()
   .openapi('QuestionAnswerBody');
 
+/** GET /api/conversations/:id/usage response (HK47 fork). */
+export const conversationUsageResponseSchema = z
+  .object({
+    usage: z
+      .object({
+        sessionId: z.string(),
+        model: z.string().nullable(),
+        contextTokens: z.number(),
+        costUsd: z.number(),
+        unpriced: z.number(),
+      })
+      .nullable(),
+  })
+  .openapi('ConversationUsageResponse');
+
 /** GET /api/conversations/:id/questions response. */
 export const pendingQuestionListSchema = z
   .array(

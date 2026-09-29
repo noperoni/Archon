@@ -80,6 +80,28 @@ export const claudeCommandListResponseSchema = z
   })
   .openapi('ClaudeCommandListResponse');
 
+/** GET /api/codebases/:id/subagents: subagents of the project's recent sessions (HK47 fork). */
+export const claudeSubagentListResponseSchema = z
+  .object({
+    agents: z.array(
+      z.object({
+        agentId: z.string(),
+        sessionId: z.string(),
+        sessionTitle: z.string(),
+        conversationId: z.string().optional(),
+        description: z.string(),
+        agentType: z.string(),
+        background: z.boolean(),
+        status: z.enum(['running', 'completed', 'failed', 'stopped', 'stale']),
+        startedAt: z.string(),
+        lastActivity: z.string(),
+        toolUses: z.number(),
+        lastTool: z.string().nullable(),
+      })
+    ),
+  })
+  .openapi('ClaudeSubagentListResponse');
+
 export const claudeSessionParamsSchema = z.object({ id: z.string(), sessionId: z.string() });
 
 /** Body for PUT /api/codebases/:id/env — upsert one key-value pair */

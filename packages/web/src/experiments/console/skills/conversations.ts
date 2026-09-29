@@ -124,3 +124,26 @@ export async function resumeClaudeSession(
     { method: 'POST' }
   );
 }
+
+/** A subagent one of the project's sessions spawned (HK47 fork). */
+export interface Subagent {
+  agentId: string;
+  sessionId: string;
+  sessionTitle: string;
+  conversationId?: string;
+  description: string;
+  agentType: string;
+  background: boolean;
+  status: 'running' | 'completed' | 'failed' | 'stopped' | 'stale';
+  startedAt: string;
+  lastActivity: string;
+  toolUses: number;
+  lastTool: string | null;
+}
+
+export async function listSubagents(projectId: string): Promise<Subagent[]> {
+  const res = await requestJson<{ agents: Subagent[] }>(
+    `/api/codebases/${encodeURIComponent(projectId)}/subagents`
+  );
+  return res.agents;
+}

@@ -8,6 +8,7 @@ import { BuilderConnected } from './builder/BuilderConnected';
 import { RunsPage } from './routes/RunsPage';
 import { RunDetailPage } from './routes/RunDetailPage';
 import { ChatPage } from './routes/ChatPage';
+import { SubagentsPage } from './routes/SubagentsPage';
 import { PreviewPage } from './routes/PreviewPage';
 import { MetricsPage } from './routes/MetricsPage';
 import { SettingsPage } from './routes/SettingsPage';
@@ -86,6 +87,7 @@ export function ConsoleApp(): ReactElement {
             <Route path="_preview" element={<PreviewPage />} />
             <Route path="p/:projectId" element={<RunsPage />} />
             <Route path="p/:projectId/chat" element={<ChatPage />} />
+            <Route path="p/:projectId/agents" element={<SubagentsPage />} />
             <Route path="p/:projectId/r/:runId" element={<RunDetailPage />} />
           </Routes>
         </main>

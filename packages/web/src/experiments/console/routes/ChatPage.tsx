@@ -7,6 +7,7 @@ import { WorkingIndicator } from '../components/WorkingIndicator';
 import { WorkflowDock } from '../components/WorkflowDock';
 import { QuestionCard } from '../components/QuestionCard';
 import { EmptyState } from '../components/EmptyState';
+import { UsageMeter } from '../components/UsageMeter';
 import { StreamContextProvider } from '../lib/stream-context';
 import { useConversationSSE } from '../lib/sse';
 import { useEntity, invalidate } from '../store/cache';
@@ -14,7 +15,7 @@ import { K } from '../store/keys';
 import * as skill from '../skills';
 import type { Project } from '../primitives/project';
 import type { Message } from '../primitives/message';
-import { QUESTION_POLL_MS, type PendingQuestion } from '../skills/messages';
+import { QUESTION_POLL_MS, type ConversationUsage, type PendingQuestion } from '../skills/messages';
 import type { ConversationSummary } from '../primitives/conversation';
 import type { ClaudeSession, SlashCommand } from '../skills/conversations';
 
@@ -155,6 +156,17 @@ export function ChatPage(): ReactElement {
     activeConvId !== null ? K.messages(activeConvId) : 'noop:no-conv',
     () => (activeConvId !== null ? skill.listMessages(activeConvId) : Promise.resolve([]))
   );
+
+  const { data: usage } = useEntity<ConversationUsage | null>(
+    activeConvId !== null ? K.usage(activeConvId) : 'noop:no-conv-usage',
+    () => (activeConvId !== null ? skill.getUsage(activeConvId) : Promise.resolve(null))
+  );
+  // Every change to the message list is a call that moved the transcript.
+  const lastMessageId = messages?.[messages.length - 1]?.id;
+  const messageCount = messages?.length ?? 0;
+  useEffect(() => {
+    if (activeConvId !== null) invalidate(K.usage(activeConvId));
+  }, [activeConvId, lastMessageId, messageCount]);
 
   const { data: questions } = useEntity<PendingQuestion[]>(
     activeConvId !== null ? K.questions(activeConvId) : 'noop:no-conv-questions',
@@ -503,7 +515,12 @@ export function ChatPage(): ReactElement {
         </div>
       ) : null}
 
-      <ChatComposer onSend={onSend} disabled={busy} commands={commands} />
+      <ChatComposer
+        onSend={onSend}
+        disabled={busy}
+        commands={commands}
+        status={usage !== null && usage !== undefined ? <UsageMeter usage={usage} /> : null}
+      />
     </section>
   );
 }

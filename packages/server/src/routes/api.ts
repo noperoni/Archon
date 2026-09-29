@@ -284,6 +284,7 @@ import { updateCheckResponseSchema } from './schemas/system.schemas';
 import { metricsQuerySchema, metricsResponseSchema } from './schemas/metrics.schemas';
 import { buildMetrics, defaultConfigDirs, defaultQueueDir, type Range } from '../metrics/metrics';
 import { TranscriptIndex } from '../metrics/transcript-index';
+import { conversationUsage } from '../metrics/conversation-usage';
 import { archonSources } from '../metrics/archon-sources';
 import {
   workflowListResponseSchema,
@@ -324,6 +325,7 @@ import {
   questionAnswerParamsSchema,
   questionAnswerBodySchema,
   pendingQuestionListSchema,
+  conversationUsageResponseSchema,
 } from './schemas/conversation.schemas';
 import { answerQuestion, listQuestions } from '@archon/core/services/pending-questions';
 import {
@@ -339,7 +341,9 @@ import {
   claudeSessionListResponseSchema,
   claudeSessionParamsSchema,
   claudeCommandListResponseSchema,
+  claudeSubagentListResponseSchema,
 } from './schemas/codebase.schemas';
+import { listSessionSubagents } from '@archon/core/services/claude-subagents';
 import { listClaudeSlashCommands } from '@archon/core/services/claude-commands';
 import {
   ACCOUNT_CONFIG_DIRS,
@@ -798,6 +802,26 @@ const answerQuestionRoute = createRoute({
   },
 });
 
+// The Agents tab reads the sessions active in the last week, at most this many.
+const SUBAGENT_WINDOW_MS = 7 * 24 * 3600_000;
+const SUBAGENT_SESSIONS = 20;
+
+// HK47 fork: the chat footer's context and cost counter.
+const conversationUsageRoute = createRoute({
+  method: 'get',
+  path: '/api/conversations/{id}/usage',
+  tags: ['Conversations'],
+  summary: "Context tokens and notional cost of the conversation's Claude session",
+  request: { params: conversationIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: conversationUsageResponseSchema } },
+      description: 'Usage, or null before the first turn has written a transcript',
+    },
+    404: jsonError('Conversation not found'),
+  },
+});
+
 const dismissQuestionRoute = createRoute({
   method: 'post',
   path: '/api/conversations/{id}/questions/{toolUseId}/dismiss',
@@ -933,6 +957,21 @@ const listClaudeCommandsRoute = createRoute({
     200: {
       content: { 'application/json': { schema: claudeCommandListResponseSchema } },
       description: 'Commands, sorted by name',
+    },
+    404: jsonError('Codebase not found'),
+  },
+});
+
+const listSubagentsRoute = createRoute({
+  method: 'get',
+  path: '/api/codebases/{id}/subagents',
+  tags: ['Codebases'],
+  summary: "Subagents spawned by the project's sessions of the last week, running first",
+  request: { params: codebaseIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: claudeSubagentListResponseSchema } },
+      description: 'Subagents',
     },
     404: jsonError('Codebase not found'),
   },
@@ -3043,6 +3082,33 @@ export function registerApiRoutes(
     return c.json({ success: true });
   });
 
+  // GET /api/conversations/:id/usage - read from the session's transcript on disk
+  registerOpenApiRoute(conversationUsageRoute, async c => {
+    const platformConversationId = c.req.param('id') ?? '';
+    try {
+      const conv = await conversationDb.findConversationByPlatformId(platformConversationId);
+      if (!conv) return apiError(c, 404, 'Conversation not found');
+      if (!conv.codebase_id) return c.json({ usage: null });
+      const history = await getSessionHistory(conv.id);
+      // The active session is the one the next turn resumes; history is newest first.
+      const session =
+        history.find(s => s.active && s.assistant_session_id) ??
+        history.find(s => s.assistant_session_id);
+      const codebase = await codebaseDb.getCodebase(conv.codebase_id);
+      if (!session?.assistant_session_id || !codebase) return c.json({ usage: null });
+      const path = claudeTranscriptPath(
+        await claudeConfigDirOf(conv.codebase_id),
+        conv.cwd ?? codebase.default_cwd,
+        session.assistant_session_id
+      );
+      if (!path || !existsSync(path)) return c.json({ usage: null });
+      return c.json({ usage: conversationUsage(path, session.assistant_session_id) });
+    } catch (error) {
+      getLog().error({ err: error, conversationId: platformConversationId }, 'usage_failed');
+      return apiError(c, 500, 'Failed to read usage');
+    }
+  });
+
   // GET /api/conversations/:id/messages - Message history
   registerOpenApiRoute(listMessagesRoute, async c => {
     const platformConversationId = c.req.param('id') ?? '';
@@ -3546,8 +3612,13 @@ export function registerApiRoutes(
         (await listClaudeTranscripts(configDir, cwd, Infinity)).map(t => ({ ...t, cwd }))
       )
     );
+    // One entry per session: an alias whose projects dir is itself a symlink to
+    // the project's (a renamed folder's compat link) lists the same files again.
+    // The project's own path wins, since cwds lists it first.
+    const seen = new Set<string>();
+    const unique = lists.flat().filter(t => !seen.has(t.sessionId) && seen.add(t.sessionId));
     // Every session, however old: retention is 36500 days so none is dropped here either.
-    return lists.flat().sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
+    return unique.sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
   }
 
   // GET /api/codebases/:id/claude-sessions - the project's transcripts, each
@@ -3588,6 +3659,42 @@ export function registerApiRoutes(
     } catch (error) {
       getLog().error({ err: error, codebaseId: id }, 'list_claude_commands_failed');
       return apiError(c, 500, 'Failed to list commands');
+    }
+  });
+
+  // GET /api/codebases/:id/subagents - console and terminal sessions alike
+  registerOpenApiRoute(listSubagentsRoute, async c => {
+    const id = c.req.param('id') ?? '';
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      const configDir = await claudeConfigDirOf(id);
+      const since = new Date(Date.now() - SUBAGENT_WINDOW_MS).toISOString();
+      const [transcripts, bound] = await Promise.all([
+        listProjectTranscripts(configDir, codebase.default_cwd),
+        listBoundAssistantSessions(id),
+      ]);
+      const recent = transcripts.filter(t => t.lastActivity >= since).slice(0, SUBAGENT_SESSIONS);
+      const lists = await Promise.all(
+        recent.map(async t => {
+          const path = claudeTranscriptPath(configDir, t.cwd, t.sessionId);
+          if (!path) return [];
+          const conversationId = bound.get(t.sessionId);
+          return (await listSessionSubagents(path, t.sessionId)).map(a => ({
+            ...a,
+            sessionTitle: t.title,
+            ...(conversationId !== undefined ? { conversationId } : {}),
+          }));
+        })
+      );
+      const live = (s: string): number => (s === 'running' ? 0 : 1);
+      const agents = lists
+        .flat()
+        .sort((a, b) => live(a.status) - live(b.status) || b.startedAt.localeCompare(a.startedAt));
+      return c.json({ agents });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id }, 'list_subagents_failed');
+      return apiError(c, 500, 'Failed to list subagents');
     }
   });
 

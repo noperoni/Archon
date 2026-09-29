@@ -7,6 +7,7 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
   type ReactElement,
+  type ReactNode,
 } from 'react';
 import {
   ACCEPTED_EXTENSIONS,
@@ -25,6 +26,8 @@ interface ChatComposerProps {
   disabledReason?: string;
   /** The project's skills and commands, offered when the message starts with `/`. */
   commands?: SlashCommand[];
+  /** Left of the key hints under the box: the context and cost readout. */
+  status?: ReactNode;
 }
 
 const MAX_HEIGHT = 200;
@@ -109,6 +112,7 @@ export function ChatComposer({
   disabled,
   disabledReason,
   commands = NO_COMMANDS,
+  status,
 }: ChatComposerProps): ReactElement {
   const [value, setValue] = useState('');
   const [voice, setVoice] = useState<'idle' | 'recording' | 'transcribing'>('idle');
@@ -612,7 +616,7 @@ export function ChatComposer({
           </button>
         </div>
         <div className="mt-[9px] flex items-center justify-between px-[2px] font-mono text-[11px] text-text-tertiary">
-          <span />
+          <span>{status}</span>
           <span>
             <span
               className="mr-1 inline-flex items-center rounded border px-[5px] py-[1px] font-mono text-[10.5px] text-text-secondary"
