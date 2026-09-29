@@ -146,6 +146,17 @@ export class ConversationLockManager {
   }
 
   /**
+   * HK-47 fork: a turn is running or waiting its turn. What the console shows as
+   * "working", so a reload mid-turn reads true rather than guessing from messages.
+   */
+  isBusy(conversationId: string): boolean {
+    return (
+      this.activeConversations.has(conversationId) ||
+      (this.messageQueues.get(conversationId)?.length ?? 0) > 0
+    );
+  }
+
+  /**
    * Get current concurrency statistics
    * @returns Current state for observability
    */

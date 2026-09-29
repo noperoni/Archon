@@ -280,6 +280,36 @@ describe('MessagePersistence', () => {
     });
   });
 
+  describe('periodic flush — HK-47 fork', () => {
+    test('keeps a running tool buffered so its output still lands', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendText('conv-1', 'done first');
+      persistence.appendToolCall('conv-1', { name: 'Read', input: {} });
+      persistence.appendToolResult('conv-1', 'Read', 'ok', 5);
+      persistence.appendText('conv-1', 'then');
+      persistence.appendToolCall('conv-1', { name: 'Bash', input: { command: 'sleep 60' } });
+      await persistence.flushAll(true);
+
+      expect(mockAddMessage).toHaveBeenCalledTimes(1);
+      expect(mockAddMessage.mock.calls[0][2]).toBe('done first');
+
+      persistence.appendToolResult('conv-1', 'Bash', 'slept', 60_000);
+      await persistence.flush('conv-1');
+      const metadata = mockAddMessage.mock.calls[1][3] as {
+        toolCalls?: { output?: string }[];
+      };
+      expect(metadata?.toolCalls?.[0]?.output).toBe('slept');
+    });
+
+    test('holds a ready segment that follows a running one, to keep row order', async () => {
+      persistence.setConversationDbId('conv-1', 'db-uuid-1');
+      persistence.appendToolCall('conv-1', { name: 'Bash', input: {} });
+      persistence.appendText('conv-1', 'later', { segment: 'new' });
+      await persistence.flushAll(true);
+      expect(mockAddMessage).toHaveBeenCalledTimes(0);
+    });
+  });
+
   describe('appendToolResult', () => {
     test('should include tool output when flushing to DB', async () => {
       persistence.setConversationDbId('conv-1', 'db-uuid-1');

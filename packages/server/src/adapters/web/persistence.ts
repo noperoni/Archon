@@ -202,7 +202,7 @@ export class MessagePersistence {
    * Each segment maps to one ChatMessage in the frontend, preserving the same
    * structure as the live streaming view (text+tools interleaving).
    */
-  async flush(conversationId: string): Promise<void> {
+  async flush(conversationId: string, periodic = false): Promise<void> {
     // Snapshot and clear the buffer synchronously before any async work.
     // This prevents a race where concurrent appendText calls push segments
     // onto the same buf reference that is mid-flush: once the map entry is
@@ -217,23 +217,29 @@ export class MessagePersistence {
     // Pre-set `duration` on the last tool in each segment so terminal tool calls
     // (those that never receive an appendToolResult) don't satisfy the
     // `output === undefined && duration === undefined` in-flight condition below.
-    const preNow = Date.now();
-    for (const seg of buf.segments) {
-      const lastTool = seg.toolCalls[seg.toolCalls.length - 1];
-      if (lastTool && lastTool.duration === undefined) {
-        lastTool.duration = preNow - lastTool.startedAt;
+    // HK-47 fork: never mid-turn. The periodic flush runs while tools are still
+    // executing, and stamping one here wrote it to the DB without its output,
+    // then dropped the output on arrival (tool_result_dropped_no_buffer).
+    if (!periodic) {
+      const preNow = Date.now();
+      for (const seg of buf.segments) {
+        const lastTool = seg.toolCalls[seg.toolCalls.length - 1];
+        if (lastTool && lastTool.duration === undefined) {
+          lastTool.duration = preNow - lastTool.startedAt;
+        }
       }
     }
 
     // Split: keep segments with in-flight tools (output pending) in the buffer
     // so appendToolResult can still find them. Only flush completed segments.
+    // A periodic flush takes only the leading ready run, so rows land in order.
     const ready: BufferedSegment[] = [];
     const pending: BufferedSegment[] = [];
     for (const seg of buf.segments) {
       const hasInflightTool = seg.toolCalls.some(
         tc => tc.output === undefined && tc.duration === undefined
       );
-      if (hasInflightTool) {
+      if (hasInflightTool || (periodic && pending.length > 0)) {
         pending.push(seg);
       } else {
         ready.push(seg);
@@ -326,11 +332,11 @@ export class MessagePersistence {
   /**
    * Flush all buffered conversations. Used by shutdown and periodic flush.
    */
-  async flushAll(): Promise<void> {
+  async flushAll(periodic = false): Promise<void> {
     const ids = [...this.assistantBuffer.keys()];
     if (ids.length === 0) return;
     getLog().info({ count: ids.length }, 'flush_all_started');
-    await Promise.allSettled(ids.map(id => this.flush(id)));
+    await Promise.allSettled(ids.map(id => this.flush(id, periodic)));
     getLog().info({ count: ids.length }, 'flush_all_completed');
   }
 
@@ -343,7 +349,7 @@ export class MessagePersistence {
   startPeriodicFlush(): void {
     if (this.periodicFlushTimer) return;
     this.periodicFlushTimer = setInterval(() => {
-      this.flushAll().catch((e: unknown) => {
+      this.flushAll(true).catch((e: unknown) => {
         getLog().error({ err: e }, 'periodic_flush_failed');
       });
     }, 30_000);

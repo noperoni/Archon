@@ -784,6 +784,20 @@ const listQuestionsRoute = createRoute({
   },
 });
 
+const conversationRunningRoute = createRoute({
+  method: 'get',
+  path: '/api/conversations/{id}/running',
+  tags: ['Conversations'],
+  summary: 'Whether a turn is running or queued in this conversation',
+  request: { params: conversationIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: z.object({ running: z.boolean() }) } },
+      description: 'The conversation lock, as the console shows it',
+    },
+  },
+});
+
 const answerQuestionRoute = createRoute({
   method: 'post',
   path: '/api/conversations/{id}/questions/{toolUseId}/answer',
@@ -3062,6 +3076,12 @@ export function registerApiRoutes(
 
   // GET /api/conversations/:id/questions - Parked AskUserQuestion calls
   registerOpenApiRoute(listQuestionsRoute, c => c.json(listQuestions(c.req.param('id') ?? '')));
+
+  // GET /api/conversations/:id/running - HK-47 fork: the lock, so the console
+  // knows a turn is live after a reload instead of inferring it from messages
+  registerOpenApiRoute(conversationRunningRoute, c =>
+    c.json({ running: lockManager.isBusy(c.req.param('id') ?? '') })
+  );
 
   // POST /api/conversations/:id/questions/:toolUseId/answer - Settle a parked AskUserQuestion
   registerOpenApiRoute(answerQuestionRoute, async c => {
