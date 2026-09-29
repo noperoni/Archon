@@ -6,6 +6,8 @@ import type { Project } from '../primitives/project';
 interface ProjectRowProps {
   project: Project;
   selected: boolean;
+  /** A Claude Code terminal is open in the project right now. */
+  live: boolean;
   onClick: () => void;
   onRemove?: () => void;
   onEditEnv?: () => void;
@@ -60,26 +62,86 @@ function TrashIcon({ size = 15 }: { size?: number }): ReactElement {
 }
 
 /**
+ * A project's rail label. Group headers already show the owner, so it is
+ * stripped unless the user renamed the project (then their name shows
+ * verbatim). Shared by the row, the folded rail's tile and the A-Z sort.
+ */
+export function projectLabel(project: Project, displayName: string): string {
+  return displayName === project.name && project.name.includes('/')
+    ? project.name.slice(project.name.indexOf('/') + 1)
+    : displayName;
+}
+
+/** {@link projectLabel} plus its monogram letter, following renames live. */
+export function useProjectLabel(project: Project): {
+  displayName: string;
+  label: string;
+  monogram: string;
+} {
+  const displayName = useDisplayName(project.id, project.name);
+  const label = projectLabel(project, displayName);
+  return { displayName, label, monogram: (label[0] ?? '?').toUpperCase() };
+}
+
+/**
+ * Folded-rail tile (HK-47 fork): the row's monogram alone, gradient-filled when
+ * selected, with a green corner dot while a Claude Code terminal is open in it.
+ */
+export function ProjectMonogramTile({
+  project,
+  selected,
+  live,
+  onClick,
+}: {
+  project: Project;
+  selected: boolean;
+  live: boolean;
+  onClick: () => void;
+}): ReactElement {
+  const { displayName, monogram } = useProjectLabel(project);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      aria-label={live ? `${displayName} (live)` : displayName}
+      title={`${displayName}\n${formatProjectLocator(project)}`}
+      className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-mono text-[13px] font-bold transition-colors ${
+        selected
+          ? 'brand-bar text-white'
+          : 'bg-surface-elevated text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+      }`}
+      // Inline because the console scope's wildcard border-color rule repaints
+      // Tailwind border utilities (see theme.css).
+      style={{ borderColor: selected ? 'transparent' : 'var(--border)' }}
+    >
+      {monogram}
+      {live ? (
+        <i
+          aria-hidden
+          className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-success shadow-[0_0_0_2px_var(--surface-inset)]"
+        />
+      ) : null}
+    </button>
+  );
+}
+
+/**
  * Rail row, design v2: monogram tile + repo-only title (the owner lives in
  * the group header above) + locator path + hover actions. Selection is the
- * gradient strip, gradient monogram, elevated background, and a LIVE pulse.
+ * gradient strip, gradient monogram and elevated background; the LIVE pulse
+ * marks a project with a Claude Code terminal open in it, selected or not.
  * Double-click the title to rename; the path stays as a stable subtitle.
  */
 export function ProjectRow({
   project,
   selected,
+  live,
   onClick,
   onRemove,
   onEditEnv,
 }: ProjectRowProps): ReactElement {
-  const displayName = useDisplayName(project.id, project.name);
-  // Group headers already show the owner — strip it from the row label
-  // unless the user renamed the project (then show their name verbatim).
-  const label =
-    displayName === project.name && project.name.includes('/')
-      ? project.name.slice(project.name.indexOf('/') + 1)
-      : displayName;
-  const monogram = (label[0] ?? '?').toUpperCase();
+  const { displayName, label, monogram } = useProjectLabel(project);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(displayName);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -205,11 +267,11 @@ export function ProjectRow({
         </span>
       </div>
 
-      {/* LIVE pulse on the selected project — hidden while hovering so the
-          env/⋯ actions can take its slot. */}
-      {selected ? (
+      {/* LIVE pulse while a Claude Code terminal is open in the project; hidden
+          while hovering so the env/⋯ actions can take its slot. */}
+      {live ? (
         <span
-          title="Active project"
+          title="A Claude Code terminal is open in this project"
           className="inline-flex shrink-0 items-center gap-[5px] font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-success group-hover:hidden"
         >
           <i
@@ -223,7 +285,7 @@ export function ProjectRow({
       {/* Hover actions: env vars + ⋯ menu. */}
       <div
         className={`flex shrink-0 items-center gap-0.5 transition-opacity ${
-          selected
+          live
             ? menuOpen
               ? 'flex'
               : 'hidden group-hover:flex'

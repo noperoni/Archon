@@ -34,3 +34,17 @@ export async function removeProject(id: string): Promise<void> {
     method: 'DELETE',
   });
 }
+
+/** One project's Claude Code activity: newest transcript write, and a terminal open in it now. */
+export interface ProjectActivity {
+  lastActivity: string | null;
+  live: boolean;
+}
+
+/** Activity for every project, keyed by project id (HK-47 fork: rail live dots and "Recent" sort). */
+export async function projectActivity(): Promise<Record<string, ProjectActivity>> {
+  const raw = await requestJson<{ projects: Record<string, ProjectActivity> }>(
+    '/api/hk47/project-activity'
+  );
+  return raw.projects;
+}

@@ -345,8 +345,10 @@ import {
   registerLocalProject,
   transcriptWatcher,
 } from '../transcript-watcher';
+import { liveClaudeCwds } from '../claude-processes';
 import {
   type ClaudeTranscript,
+  claudeProjectDir,
   claudeTranscriptPath,
   listClaudeTranscripts,
   readTranscriptTurns,
@@ -3702,6 +3704,62 @@ export function registerApiRoutes(
     const silent =
       segments.length === 0 || segments.every(seg => (seg.no_speech_prob ?? 0) > EAR_SILENT_ABOVE);
     return c.json({ text: silent ? '' : (heard.text ?? '').trim() });
+  });
+
+  // GET /api/hk47/project-activity - the console rail's live dots and "Recent"
+  // sort: per project, the newest transcript mtime across every cwd it was
+  // opened through, and whether a `claude` terminal is running in it now.
+  // Polled every 10s, so it stats and never reads a transcript.
+  app.get('/api/hk47/project-activity', async c => {
+    try {
+      const [codebases, configDirs, live] = await Promise.all([
+        codebaseDb.listCodebases(),
+        envVarDb.getEnvVarAcrossCodebases('CLAUDE_CONFIG_DIR'),
+        liveClaudeCwds(),
+      ]);
+      const fallbackDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+      const newestIn = async (dir: string): Promise<number> => {
+        let names: string[];
+        try {
+          names = await readdir(dir);
+        } catch {
+          return 0; // no transcripts under this cwd
+        }
+        const mtimes = await Promise.all(
+          names
+            .filter(name => name.endsWith('.jsonl'))
+            .map(async name => {
+              try {
+                return (await stat(join(dir, name))).mtimeMs;
+              } catch {
+                return 0; // removed between readdir and stat
+              }
+            })
+        );
+        return Math.max(0, ...mtimes);
+      };
+      const entries = await Promise.all(
+        codebases.map(async cb => {
+          const configDir = configDirs.get(cb.id) ?? fallbackDir;
+          const cwds = await transcriptCwdsFor(configDir, cb.default_cwd);
+          const newest = Math.max(
+            0,
+            ...(await Promise.all(cwds.map(cwd => newestIn(claudeProjectDir(configDir, cwd)))))
+          );
+          return [
+            cb.id,
+            {
+              lastActivity: newest > 0 ? new Date(newest).toISOString() : null,
+              live: live.has(cb.default_cwd),
+            },
+          ] as const;
+        })
+      );
+      return c.json({ projects: Object.fromEntries(entries) });
+    } catch (error) {
+      getLog().error({ err: error }, 'project_activity_failed');
+      return apiError(c, 500, 'Failed to read project activity');
+    }
   });
 
   // GET /api/workflows - Discover available workflows

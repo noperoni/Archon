@@ -93,6 +93,7 @@ export function useTranscriptSSE(): void {
       if (ev.type === 'claude_transcript') {
         invalidate(K.claudeSessions(ev.codebaseId));
         invalidate(K.conversations(ev.codebaseId));
+        invalidate(K.projectActivity);
       }
     };
     es.onerror = (): void => {

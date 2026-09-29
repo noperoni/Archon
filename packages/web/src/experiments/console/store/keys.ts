@@ -9,6 +9,7 @@ export const scopeKey = (scope: Scope): string =>
 
 export const K = {
   projects: 'projects' as const,
+  projectActivity: 'projectActivity' as const,
   project: (id: string): string => `project:${id}`,
   workflows: (cwd: string): string => `workflows:${cwd}`,
   // Encode both parts: workflow names may contain `:`, so a raw join could let
