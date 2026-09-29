@@ -16,6 +16,7 @@ import { K } from './store/keys';
 import { useKeymap, type Binding } from './lib/keymap';
 import { SHORTCUTS } from './lib/shortcuts';
 import { applyConsoleTheme } from './lib/theme';
+import { useTranscriptSSE } from './lib/sse';
 import './theme.css';
 
 applyConsoleTheme();
@@ -32,6 +33,7 @@ export function ConsoleApp(): ReactElement {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const navigate = useNavigate();
+  useTranscriptSSE();
 
   // `n` (new run) is owned by DraftRunCard's own window listener — only
   // mounted when a project is scoped — and stays there.

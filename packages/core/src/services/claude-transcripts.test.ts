@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +16,8 @@ import {
   claudeTranscriptPath,
   listClaudeTranscripts,
   readTranscriptTurns,
+  transcriptCwd,
+  transcriptCwdsFor,
 } from './claude-transcripts';
 
 const CWD = '/nfs/ops-center/Personal/mods/The Spotter : Dig or Die';
@@ -72,6 +82,26 @@ describe('claude transcripts', () => {
     expect(t.title).toBe('what is next');
   });
 
+  test('a session opened by a slash command is titled by it until something is typed', async () => {
+    write(
+      A,
+      [
+        { type: 'user', message: { content: '<command-name>/clear</command-name>' } },
+        {
+          type: 'user',
+          message: {
+            content:
+              '<command-message>start-session</command-message>\n<command-name>/start-session</command-name>\n<command-args>the archon work</command-args>',
+          },
+        },
+        { type: 'user', isMeta: true, message: { content: 'Base directory for this skill' } },
+      ],
+      1000
+    );
+    const [t] = await listClaudeTranscripts(configDir, CWD);
+    expect(t.title).toBe('/start-session the archon work');
+  });
+
   test('skips files that never got a prompt, and non-session files', async () => {
     write(A, [{ type: 'mode', sessionId: A }], 1000);
     writeFileSync(join(dir, 'notes.jsonl'), '{}\n');
@@ -87,7 +117,7 @@ describe('claude transcripts', () => {
     expect(claudeTranscriptPath(configDir, CWD, A)).toBe(join(dir, `${A}.jsonl`));
   });
 
-  test('reads the turns before the cut-off: prompts and text, tool traffic and meta dropped', async () => {
+  test("reads the terminal's turns: prompts and text; tool traffic, meta and the console's SDK lines dropped", async () => {
     const at = (m: number): string => `2026-09-26T10:0${String(m)}:00.000Z`;
     write(
       A,
@@ -118,14 +148,65 @@ describe('claude transcripts', () => {
           message: { content: [{ type: 'text', text: 'Fixed.' }] },
         },
         { type: 'user', timestamp: at(3), message: { content: '<command-name>/clear' } },
-        { type: 'user', uuid: 'u2', timestamp: at(5), message: { content: 'from the console' } },
+        {
+          type: 'user',
+          uuid: 'u2',
+          entrypoint: 'sdk-ts',
+          timestamp: at(5),
+          message: { content: 'from the console' },
+        },
+        {
+          type: 'assistant',
+          uuid: 'a4',
+          entrypoint: 'sdk-ts',
+          timestamp: at(5),
+          message: { content: [{ type: 'text', text: 'console reply' }] },
+        },
+        {
+          type: 'user',
+          uuid: 'u3',
+          entrypoint: 'cli',
+          timestamp: at(7),
+          message: { content: 'back in the terminal' },
+        },
       ],
       1000
     );
-    const turns = await readTranscriptTurns(join(dir, `${A}.jsonl`), new Date(at(4)));
+    const turns = await readTranscriptTurns(join(dir, `${A}.jsonl`));
     expect(turns.map(t => [t.id, t.role, t.content])).toEqual([
       ['u1', 'user', 'fix the gate'],
       ['a1', 'assistant', 'Looking.\n\nFixed.'],
+      ['u3', 'user', 'back in the terminal'],
     ]);
+  });
+
+  test('re-reads a transcript once it grows', async () => {
+    const path = join(dir, `${A}.jsonl`);
+    const line = (uuid: string, text: string): unknown => ({
+      type: 'user',
+      uuid,
+      timestamp: '2026-09-26T10:00:00.000Z',
+      message: { content: text },
+    });
+    write(A, [line('u1', 'one')], 1000);
+    expect((await readTranscriptTurns(path)).length).toBe(1);
+    write(A, [line('u1', 'one'), line('u2', 'two')], 2000);
+    expect((await readTranscriptTurns(path)).map(t => t.id)).toEqual(['u1', 'u2']);
+  });
+
+  test('reads the cwd a transcript was recorded in', async () => {
+    write(A, [{ type: 'mode' }, { type: 'user', cwd: CWD, message: { content: 'x' } }], 1000);
+    expect(await transcriptCwd(join(dir, `${A}.jsonl`))).toBe(CWD);
+  });
+  test('finds the transcripts a project left under a symlink it was opened through', async () => {
+    const real = join(configDir, 'work', 'HK47');
+    const link = join(configDir, 'work', 'personality');
+    mkdirSync(real, { recursive: true });
+    symlinkSync(real, link);
+    const linkDir = claudeProjectDir(configDir, link);
+    mkdirSync(linkDir, { recursive: true });
+    writeFileSync(join(linkDir, `${A}.jsonl`), JSON.stringify({ type: 'user', cwd: link }) + '\n');
+    const cwds = await transcriptCwdsFor(configDir, realpathSync(real));
+    expect(cwds).toEqual([realpathSync(real), link]);
   });
 });

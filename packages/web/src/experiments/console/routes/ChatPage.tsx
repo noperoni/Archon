@@ -101,6 +101,38 @@ export function ChatPage(): ReactElement {
     })();
   };
 
+  // One timeline: every transcript once, opening the console conversation that
+  // resumed it if one has, then console conversations with no transcript yet;
+  // newest first by the transcript's own activity, whoever wrote last.
+  const timeline = useMemo(() => {
+    const items: { value: string; label: string; at: string }[] = [];
+    const shown = new Set<string>();
+    for (const t of claudeSessions ?? []) {
+      if (t.conversationId !== undefined && shown.has(t.conversationId)) continue;
+      if (t.conversationId !== undefined) shown.add(t.conversationId);
+      items.push({
+        value: t.conversationId ?? `${TERMINAL_PREFIX}${t.sessionId}`,
+        label: `${t.lastActivity.slice(0, 10)} ${t.title}${t.conversationId === undefined ? ' · terminal' : ''}`,
+        at: t.lastActivity,
+      });
+    }
+    for (const c of conversations ?? []) {
+      if (c.platformType !== 'web' || shown.has(c.id)) continue;
+      const at = (c.lastActivityAt ?? '').replace(' ', 'T');
+      items.push({ value: c.id, label: `${at.slice(0, 10)} ${c.title ?? 'Untitled'}`, at });
+    }
+    return items.sort((a, b) => b.at.localeCompare(a.at));
+  }, [claudeSessions, conversations]);
+
+  // The open conversation's transcript moved (a terminal continuing the same
+  // session, most likely): its merged history changed with it.
+  const activeActivity = (claudeSessions ?? []).find(
+    t => activeConvId !== null && t.conversationId === activeConvId
+  )?.lastActivity;
+  useEffect(() => {
+    if (activeConvId !== null && activeActivity !== undefined) invalidate(K.messages(activeConvId));
+  }, [activeConvId, activeActivity]);
+
   const { data: messages, error: messagesError } = useEntity<Message[]>(
     activeConvId !== null ? K.messages(activeConvId) : 'noop:no-conv',
     () => (activeConvId !== null ? skill.listMessages(activeConvId) : Promise.resolve([]))
@@ -332,26 +364,11 @@ export function ChatPage(): ReactElement {
             className="max-w-[320px] shrink-0 truncate rounded border border-border bg-surface-elevated px-2 py-1 text-xs text-text-secondary"
           >
             <option value={NEW_CONVERSATION}>New conversation</option>
-            {(conversations ?? []).some(c => c.platformType === 'web') ? (
-              <optgroup label="Console">
-                {(conversations ?? [])
-                  .filter(c => c.platformType === 'web')
-                  .map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.title ?? 'Untitled'}
-                    </option>
-                  ))}
-              </optgroup>
-            ) : null}
-            {(claudeSessions ?? []).length > 0 ? (
-              <optgroup label="Terminal (resume)">
-                {(claudeSessions ?? []).map(t => (
-                  <option key={t.sessionId} value={`${TERMINAL_PREFIX}${t.sessionId}`}>
-                    {t.lastActivity.slice(0, 10)} {t.title}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
+            {timeline.map(item => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
           </select>
         </div>
         <ProjectViewTabs projectId={projectId} active="chat" />

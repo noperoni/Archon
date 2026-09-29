@@ -57,6 +57,10 @@ export const claudeSessionListResponseSchema = z
         title: z.string(),
         lastActivity: z.string(),
         sizeBytes: z.number(),
+        /** The path it was opened through: the project's own, or a symlink to it. */
+        cwd: z.string(),
+        /** Platform id of the console conversation that resumed it, if one has. */
+        conversationId: z.string().optional(),
       })
     ),
   })

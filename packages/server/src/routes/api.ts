@@ -31,8 +31,6 @@ import {
   toSafeConfig,
   updateGlobalConfig,
   cloneRepository,
-  registerRepository,
-  registerFolder,
   ConversationNotFoundError,
   generateAndSetTitle,
   resolveTitleRequest,
@@ -65,7 +63,7 @@ import {
 import type { UserTiersPatch, UserAliasesPatch, AliasesPatch } from '@archon/core';
 import { parseWorkflowRunConfig } from '@archon/core/config';
 import type { WorkflowRunConfigInput } from '@archon/workflows/schemas/run-config';
-import { findRepoRoot, removeWorktree, toRepoPath, toWorktreePath } from '@archon/git';
+import { removeWorktree, toRepoPath, toWorktreePath } from '@archon/git';
 import {
   createLogger,
   getWorkflowFolderSearchPaths,
@@ -269,7 +267,7 @@ import * as messageDb from '@archon/core/db/messages';
 import {
   createSession,
   getSessionHistory,
-  listBoundAssistantSessionIds,
+  listBoundAssistantSessions,
 } from '@archon/core/db/sessions';
 import * as userDb from '@archon/core/db/users';
 import {
@@ -342,9 +340,17 @@ import {
   claudeSessionParamsSchema,
 } from './schemas/codebase.schemas';
 import {
+  ACCOUNT_CONFIG_DIRS,
+  type ClaudeAccount,
+  registerLocalProject,
+  transcriptWatcher,
+} from '../transcript-watcher';
+import {
+  type ClaudeTranscript,
   claudeTranscriptPath,
   listClaudeTranscripts,
   readTranscriptTurns,
+  transcriptCwdsFor,
 } from '@archon/core/services/claude-transcripts';
 import {
   updateAssistantConfigBodySchema,
@@ -2730,10 +2736,6 @@ export function registerApiRoutes(
     };
   }
 
-  // HK-47 fork: the two Claude accounts, told apart by config dir name.
-  const ACCOUNT_CONFIG_DIRS = { personal: '.claude-personal', work: '.claude-work' } as const;
-  type ClaudeAccount = keyof typeof ACCOUNT_CONFIG_DIRS;
-
   /**
    * The account a codebase's runs use: its own CLAUDE_CONFIG_DIR env var, else
    * the server's, which is the same precedence buildRequestSubprocessEnv applies.
@@ -3019,9 +3021,15 @@ export function registerApiRoutes(
           user_id: null,
           created_at: now,
         }));
-      // Earlier history only belongs at the front when the window reaches it.
-      const earlier = messages.length < limit ? await terminalHistory(conv) : [];
-      return c.json([...earlier, ...messages, ...pending].map(toApiMessage));
+      // The terminal's turns interleave with the console's by time, so a session
+      // continued in both reads as one conversation. Turns older than the window
+      // only belong when the window reaches the conversation's start.
+      const oldest = messages.length < limit ? -Infinity : dbTime(messages[0].created_at);
+      const terminal = (await terminalHistory(conv)).filter(t => dbTime(t.created_at) >= oldest);
+      const merged = [...terminal, ...messages].sort(
+        (a, b) => dbTime(a.created_at) - dbTime(b.created_at)
+      );
+      return c.json([...merged, ...pending].map(toApiMessage));
     } catch (error) {
       getLog().error({ err: error }, 'list_messages_failed');
       return apiError(c, 500, 'Failed to list messages');
@@ -3187,6 +3195,39 @@ export function registerApiRoutes(
     });
   });
 
+  // GET /api/stream/__transcripts__ — HK-47 fork (PERS-24): a Claude Code
+  // session moved, or a project was discovered. Every connection gets its own
+  // subscription, so several tabs and devices all stay live (the transport's
+  // one-stream-per-id map would let the newest connection evict the rest).
+  app.get('/api/stream/__transcripts__', async c => {
+    return streamSSE(c, async stream => {
+      await stream.writeSSE({
+        data: JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }),
+      });
+      const unsubscribe = transcriptWatcher.subscribe(event => {
+        if (stream.closed) return;
+        stream.writeSSE({ data: JSON.stringify(event) }).catch((e: unknown) => {
+          getLog().debug({ err: e }, 'transcripts_sse_write_failed');
+        });
+      });
+      stream.onAbort(unsubscribe);
+      try {
+        while (!stream.closed) {
+          await stream.sleep(30000);
+          if (!stream.closed) {
+            await stream.writeSSE({
+              data: JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }),
+            });
+          }
+        }
+      } catch {
+        // client went away mid-heartbeat
+      } finally {
+        unsubscribe();
+      }
+    });
+  });
+
   // GET /api/stream/:conversationId - SSE streaming
   app.get('/api/stream/:conversationId', async c => {
     const conversationId = c.req.param('conversationId');
@@ -3288,28 +3329,14 @@ export function registerApiRoutes(
       if (body.url) {
         result = await cloneRepository(body.url);
       } else {
-        const localPath = body.path ?? '';
-        // Detect git-ness. A resolvable repo root → register as a repo project;
-        // a definitive null ("not a git repository") → folder project. A THROW
-        // is ambiguous: findRepoRoot throws both for a nonexistent path (benign
-        // — fall through so registerFolder's own existence check produces the
-        // clean error) and for a genuine git failure (git missing, timeout,
-        // permission) on a path that DOES exist. The latter must NOT register:
-        // it would permanently misclassify a real repo as kind:'folder'.
-        let repoRoot: string | null = null;
-        try {
-          repoRoot = await findRepoRoot(localPath);
-        } catch (err) {
-          getLog().warn({ err, path: localPath }, 'api.add_codebase_repo_detect_failed');
-          if (existsSync(localPath)) {
-            return apiError(
-              c,
-              500,
-              'Could not determine whether the path is a git repository (git failed — is git installed and the path readable?). Nothing was registered; retry once the underlying issue is resolved.'
-            );
-          }
+        result = await registerLocalProject(body.path ?? '');
+        if (result === null) {
+          return apiError(
+            c,
+            500,
+            'Could not determine whether the path is a git repository (git failed — is git installed and the path readable?). Nothing was registered; retry once the underlying issue is resolved.'
+          );
         }
-        result = repoRoot ? await registerRepository(localPath) : await registerFolder(localPath);
       }
 
       // Fetch the full codebase record for a consistent response
@@ -3409,16 +3436,24 @@ export function registerApiRoutes(
     return envVars.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
   }
 
+  /** Epoch ms of a stored timestamp: SQLite keeps `YYYY-MM-DD HH:MM:SS` UTC with no zone. */
+  function dbTime(value: string | Date): number {
+    if (value instanceof Date) return value.getTime();
+    return new Date(
+      /[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value.replace(' ', 'T')}Z`
+    ).getTime();
+  }
+
   /**
-   * HK-47 fork (PERS-18): the terminal turns a resumed conversation continues
-   * from, read in place from the transcript up to the moment the console
-   * conversation was created. A conversation born in the console has no turns
-   * before its own creation, so this is empty for it without any marker.
+   * HK-47 fork (PERS-18): the turns a terminal wrote into the transcript this
+   * conversation resumed, read in place: those before the resume and any the
+   * terminal adds afterwards. A conversation born in the console has only the
+   * SDK's lines in its transcript, so this is empty for it without any marker.
    */
   async function terminalHistory(conv: {
     id: string;
     codebase_id: string | null;
-    created_at: string | Date;
+    cwd: string | null;
   }): Promise<MessageRow[]> {
     if (!conv.codebase_id) return [];
     try {
@@ -3427,23 +3462,14 @@ export function registerApiRoutes(
       if (!first?.assistant_session_id) return [];
       const codebase = await codebaseDb.getCodebase(conv.codebase_id);
       if (!codebase) return [];
+      // A session resumed from a symlinked path runs there, and its transcript lives there.
       const path = claudeTranscriptPath(
         await claudeConfigDirOf(conv.codebase_id),
-        codebase.default_cwd,
+        conv.cwd ?? codebase.default_cwd,
         first.assistant_session_id
       );
       if (!path || !existsSync(path)) return [];
-      // SQLite stores `YYYY-MM-DD HH:MM:SS` in UTC with no zone; Postgres hands back a Date.
-      const created =
-        conv.created_at instanceof Date
-          ? conv.created_at
-          : new Date(
-              /[zZ]|[+-]\d\d:?\d\d$/.test(conv.created_at)
-                ? conv.created_at
-                : `${conv.created_at.replace(' ', 'T')}Z`
-            );
-      if (Number.isNaN(created.getTime())) return [];
-      const turns = await readTranscriptTurns(path, created);
+      const turns = await readTranscriptTurns(path);
       return turns.map(t => ({
         id: `terminal-${t.id}`,
         conversation_id: conv.id,
@@ -3459,20 +3485,41 @@ export function registerApiRoutes(
     }
   }
 
-  // GET /api/codebases/:id/claude-sessions - the project's terminal transcripts,
-  // less those a console conversation of this project has already bound (they
-  // live in the Console list, and resuming one again would fork a second copy).
+  /**
+   * A project's transcripts under every path it was opened through (its own and
+   * any symlink to it), most recent first, each tagged with that path.
+   */
+  async function listProjectTranscripts(
+    configDir: string,
+    defaultCwd: string
+  ): Promise<(ClaudeTranscript & { cwd: string })[]> {
+    const cwds = await transcriptCwdsFor(configDir, defaultCwd);
+    const lists = await Promise.all(
+      cwds.map(async cwd =>
+        (await listClaudeTranscripts(configDir, cwd, Infinity)).map(t => ({ ...t, cwd }))
+      )
+    );
+    // Every session, however old: retention is 36500 days so none is dropped here either.
+    return lists.flat().sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
+  }
+
+  // GET /api/codebases/:id/claude-sessions - the project's transcripts, each
+  // carrying the console conversation that bound it if one has, so the console
+  // lists every session once and opens a bound one instead of resuming it again
+  // (which would fork a second copy).
   registerOpenApiRoute(listClaudeSessionsRoute, async c => {
     const id = c.req.param('id') ?? '';
     try {
       const codebase = await codebaseDb.getCodebase(id);
       if (!codebase) return apiError(c, 404, 'Codebase not found');
       const [transcripts, bound] = await Promise.all([
-        listClaudeTranscripts(await claudeConfigDirOf(id), codebase.default_cwd),
-        listBoundAssistantSessionIds(id),
+        listProjectTranscripts(await claudeConfigDirOf(id), codebase.default_cwd),
+        listBoundAssistantSessions(id),
       ]);
-      const taken = new Set(bound);
-      const sessions = transcripts.filter(t => !taken.has(t.sessionId));
+      const sessions = transcripts.map(t => {
+        const conversationId = bound.get(t.sessionId);
+        return conversationId === undefined ? t : { ...t, conversationId };
+      });
       return c.json({ sessions });
     } catch (error) {
       getLog().error({ err: error, codebaseId: id }, 'list_claude_sessions_failed');
@@ -3494,12 +3541,13 @@ export function registerApiRoutes(
         return apiError(c, 400, 'Only Claude projects can resume a Claude Code session');
       }
       const configDir = await claudeConfigDirOf(id);
-      const path = claudeTranscriptPath(configDir, codebase.default_cwd, sessionId);
-      if (!path) return apiError(c, 400, 'Not a Claude session id');
-      if (!existsSync(path)) return apiError(c, 404, 'Transcript not found');
-      const transcript = (await listClaudeTranscripts(configDir, codebase.default_cwd)).find(
+      if (!claudeTranscriptPath(configDir, codebase.default_cwd, sessionId)) {
+        return apiError(c, 400, 'Not a Claude session id');
+      }
+      const transcript = (await listProjectTranscripts(configDir, codebase.default_cwd)).find(
         t => t.sessionId === sessionId
       );
+      if (!transcript) return apiError(c, 404, 'Transcript not found');
 
       const userId = await resolveWebUserId(c);
       const platformId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -3511,6 +3559,10 @@ export function registerApiRoutes(
         userId
       );
       webAdapter.setConversationDbId(conversation.platform_conversation_id, conversation.id);
+      // Opened through a symlink: resume there, where Claude Code filed the session.
+      if (transcript.cwd !== codebase.default_cwd) {
+        await conversationDb.updateConversation(conversation.id, { cwd: transcript.cwd });
+      }
       await createSession({
         conversation_id: conversation.id,
         codebase_id: id,
@@ -3518,10 +3570,7 @@ export function registerApiRoutes(
         assistant_session_id: sessionId,
         transition_reason: 'first-message',
       });
-      await conversationDb.updateConversationTitle(
-        conversation.id,
-        transcript?.title ?? `Terminal session ${sessionId.slice(0, 8)}`
-      );
+      await conversationDb.updateConversationTitle(conversation.id, transcript.title);
       return c.json({ conversationId: conversation.platform_conversation_id, id: conversation.id });
     } catch (error) {
       getLog().error({ err: error, codebaseId: id, sessionId }, 'resume_claude_session_failed');

@@ -88,6 +88,8 @@ export interface ClaudeSession {
   title: string;
   lastActivity: string;
   sizeBytes: number;
+  /** Platform id of the console conversation that resumed it, if one has. */
+  conversationId?: string;
 }
 
 export async function listClaudeSessions(projectId: string): Promise<ClaudeSession[]> {

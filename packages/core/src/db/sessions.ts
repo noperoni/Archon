@@ -170,18 +170,28 @@ export async function getSessionHistory(conversationId: string): Promise<readonl
 }
 
 /**
- * HK-47 fork (PERS-18): every assistant session id already bound by a
- * conversation of this codebase, so the console's Terminal list can leave out
- * transcripts that already have a console conversation.
+ * HK-47 fork (PERS-18): every assistant session id a conversation of this
+ * codebase has bound, mapped to the platform id of the newest such
+ * conversation, so the console can list each transcript exactly once.
  */
-export async function listBoundAssistantSessionIds(codebaseId: string): Promise<string[]> {
-  const result = await pool.query<{ assistant_session_id: string }>(
-    `SELECT DISTINCT s.assistant_session_id FROM remote_agent_sessions s
+export async function listBoundAssistantSessions(codebaseId: string): Promise<Map<string, string>> {
+  const result = await pool.query<{
+    assistant_session_id: string;
+    platform_conversation_id: string;
+  }>(
+    `SELECT s.assistant_session_id, c.platform_conversation_id FROM remote_agent_sessions s
      JOIN remote_agent_conversations c ON c.id = s.conversation_id
-     WHERE c.codebase_id = $1 AND s.assistant_session_id IS NOT NULL`,
+     WHERE c.codebase_id = $1 AND s.assistant_session_id IS NOT NULL AND c.deleted_at IS NULL
+     ORDER BY s.started_at DESC`,
     [codebaseId]
   );
-  return result.rows.map(r => r.assistant_session_id);
+  const bound = new Map<string, string>();
+  for (const r of result.rows) {
+    if (!bound.has(r.assistant_session_id)) {
+      bound.set(r.assistant_session_id, r.platform_conversation_id);
+    }
+  }
+  return bound;
 }
 
 /**

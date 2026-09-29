@@ -78,6 +78,35 @@ export function useDashboardSSE(): void {
 }
 
 /**
+ * HK-47 fork (PERS-24): follow Claude Code's transcripts in every project. A
+ * session that moves, from a terminal or from here, refreshes its project's
+ * session list; a project discovered from a new session refreshes the rail.
+ * Mounted once, by ConsoleApp.
+ */
+export function useTranscriptSSE(): void {
+  useEffect(() => {
+    const es = new EventSource(`${SSE_BASE_URL}/api/stream/__transcripts__`);
+    es.onmessage = (e: MessageEvent<string>): void => {
+      const ev = parse(e.data) as (ParsedEvent & { codebaseId?: string }) | null;
+      if (typeof ev?.codebaseId !== 'string') return;
+      if (ev.type === 'projects_changed') invalidate(K.projects);
+      if (ev.type === 'claude_transcript') {
+        invalidate(K.claudeSessions(ev.codebaseId));
+        invalidate(K.conversations(ev.codebaseId));
+      }
+    };
+    es.onerror = (): void => {
+      if (es.readyState === EventSource.CLOSED) {
+        console.warn('[console-sse] transcript stream closed');
+      }
+    };
+    return (): void => {
+      es.close();
+    };
+  }, []);
+}
+
+/**
  * Subscribe to a single run's conversation stream and invalidate the detail
  * caches on every interesting event. Skips connecting until a platform
  * conversation id is known.
