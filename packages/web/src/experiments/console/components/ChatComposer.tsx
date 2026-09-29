@@ -1,5 +1,12 @@
-import { Paperclip } from 'lucide-react';
-import { useRef, useState, type KeyboardEvent, type ReactElement } from 'react';
+import { Loader2, Mic, Paperclip, Square } from 'lucide-react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type ReactElement,
+} from 'react';
 import {
   ACCEPTED_EXTENSIONS,
   MAX_FILES,
@@ -8,6 +15,7 @@ import {
   formatBytes,
   isAcceptedFileType,
 } from '../primitives/file';
+import { transcribe } from '../skills/voice';
 
 interface ChatComposerProps {
   onSend: (message: string, files?: File[]) => void;
@@ -24,8 +32,9 @@ interface PickedFile {
 
 /**
  * Console-native chat composer. Auto-growing textarea, Enter sends,
- * Shift+Enter newline, Escape blurs. Click-to-attach files via the paperclip
- * icon (the send skill builds the multipart upload).
+ * Shift+Enter newline, Escape blurs. Attach files via the paperclip icon or by
+ * pasting them (the send skill builds the multipart upload). The mic dictates
+ * into the textarea: click to start, click again to stop and transcribe.
  *
  * Reimplemented (not imported) from the old chat's MessageInput because the
  * console may not import production `@/components/**` (ESLint isolation rule).
@@ -46,6 +55,87 @@ export function ChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const idRef = useRef(0);
+
+  // Dictation (PERS-23): one click starts capture, the next stops it and sends
+  // the clip to the ear; the text lands in the composer, never sent on its own.
+  const [voice, setVoice] = useState<'idle' | 'recording' | 'transcribing'>('idle');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+
+  useEffect(
+    () => (): void => {
+      const recorder = recorderRef.current;
+      if (recorder === null) return;
+      recorder.onstop = null;
+      if (recorder.state !== 'inactive') recorder.stop();
+      recorder.stream.getTracks().forEach(t => {
+        t.stop();
+      });
+    },
+    []
+  );
+
+  const insertDictation = (text: string): void => {
+    setValue(prev => (prev.trim().length > 0 ? `${prev.trimEnd()} ${text}` : text));
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el === null) return;
+      grow(el);
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
+  const toggleVoice = async (): Promise<void> => {
+    const recording = recorderRef.current;
+    if (recording !== null && recording.state === 'recording') {
+      recording.stop();
+      return;
+    }
+    if (voice !== 'idle') return;
+    setVoiceError(null);
+    // Undefined outside a secure context: the LAN console is https for this.
+    if (navigator.mediaDevices === undefined) {
+      setVoiceError('Microphone needs https (or localhost).');
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e: unknown) {
+      setVoiceError(e instanceof Error ? `Microphone: ${e.message}` : 'Microphone refused.');
+      return;
+    }
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : '';
+    const recorder = new MediaRecorder(stream, mimeType !== '' ? { mimeType } : undefined);
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e: BlobEvent): void => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onstop = (): void => {
+      stream.getTracks().forEach(t => {
+        t.stop();
+      });
+      recorderRef.current = null;
+      setVoice('transcribing');
+      void (async (): Promise<void> => {
+        try {
+          const text = await transcribe(new Blob(chunks, { type: recorder.mimeType }));
+          if (text.length > 0) insertDictation(text);
+          else setVoiceError('Heard only silence.');
+        } catch (e: unknown) {
+          setVoiceError(e instanceof Error ? e.message : 'Transcription failed.');
+        } finally {
+          setVoice('idle');
+        }
+      })();
+    };
+    recorderRef.current = recorder;
+    recorder.start();
+    setVoice('recording');
+  };
 
   const grow = (el: HTMLTextAreaElement): void => {
     el.style.height = 'auto';
@@ -80,6 +170,16 @@ export function ChatComposer({
         ? `Skipped ${String(skipped.length)} file(s) — ${skipped.join('; ')}`
         : null
     );
+  };
+
+  // Clipboard files (screenshots) join the paperclip's attachments. A clipboard
+  // that also carries text (a spreadsheet range copies as text plus a picture)
+  // pastes as text, which is what the copy meant.
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>): void => {
+    const pasted = Array.from(e.clipboardData.files);
+    if (pasted.length === 0 || e.clipboardData.types.includes('text/plain')) return;
+    e.preventDefault();
+    addFiles(pasted);
   };
 
   const removeFile = (id: string): void => {
@@ -152,6 +252,9 @@ export function ChatComposer({
         {fileError !== null ? (
           <div className="mb-[8px] font-mono text-[11px] text-error">{fileError}</div>
         ) : null}
+        {voiceError !== null ? (
+          <div className="mb-[8px] font-mono text-[11px] text-error">{voiceError}</div>
+        ) : null}
         <div
           className="flex items-end gap-[10px] rounded-[14px] border bg-[color:var(--surface-elevated)] py-[8px] pl-[14px] pr-[8px] transition-[border-color,box-shadow] focus-within:border-[color:color-mix(in_oklch,var(--brand-magenta),transparent_40%)] focus-within:shadow-[0_0_0_4px_color-mix(in_oklch,var(--brand-magenta),transparent_92%)]"
           style={{ borderColor: 'var(--border-bright)' }}
@@ -181,6 +284,33 @@ export function ChatComposer({
             />
             <button
               type="button"
+              onClick={() => {
+                void toggleVoice();
+              }}
+              aria-label={voice === 'recording' ? 'Stop dictation' : 'Dictate'}
+              aria-pressed={voice === 'recording'}
+              disabled={disabled || voice === 'transcribing'}
+              title={
+                voice === 'recording'
+                  ? 'Stop and transcribe'
+                  : voice === 'transcribing'
+                    ? 'Transcribing…'
+                    : 'Dictate'
+              }
+              className={`flex h-[22px] w-[22px] cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-text-primary disabled:cursor-default disabled:opacity-50 ${
+                voice === 'recording' ? 'animate-pulse text-[color:var(--accent)]' : ''
+              }`}
+            >
+              {voice === 'recording' ? (
+                <Square className="h-4 w-4 fill-current" />
+              ) : voice === 'transcribing' ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Mic className="h-5 w-5" />
+              )}
+            </button>
+            <button
+              type="button"
               tabIndex={-1}
               aria-label="Commands"
               disabled
@@ -198,6 +328,7 @@ export function ChatComposer({
               grow(e.target);
             }}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             rows={1}
             placeholder={disabled ? (disabledReason ?? 'Waiting…') : 'Message the agent…'}
             className="min-h-0 flex-1 resize-none bg-transparent py-[7px] text-[14.5px] leading-[1.5] text-text-primary placeholder:text-text-tertiary focus:outline-none disabled:opacity-50"

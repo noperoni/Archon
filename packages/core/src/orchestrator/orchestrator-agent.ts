@@ -1894,7 +1894,7 @@ function buildFullPrompt(
 
   const fileSuffix =
     attachedFiles && attachedFiles.length > 0
-      ? '\n\n---\n\n## Attached Files\n\nThe user has uploaded the following files. Use your file reading tools (Read, View) to access them:\n\n' +
+      ? '\n\n---\n\n## Attached Files\n\nThe user has uploaded the following files. Read every one of them with the Read tool before answering; Read shows images to you as images:\n\n' +
         attachedFiles
           .map(f => `- ${f.name} (${f.mimeType}, ${String(f.size)} bytes): ${f.path}`)
           .join('\n')

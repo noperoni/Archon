@@ -487,6 +487,11 @@ const workflowTargetQuerySchema = cwdQuerySchema.extend({
   source: z.enum(['project', 'global']).optional(),
 });
 
+// The ear (PERS-11): Whisper on the 3090, reached through hk47-voice-tunnel.
+const EAR_URL = process.env.HK47_EAR_URL ?? 'http://127.0.0.1:3902';
+const EAR_MAX_BYTES = 4 * 1024 * 1024; // the ear's own body limit
+const EAR_SILENT_ABOVE = 0.5;
+
 const getMetricsRoute = createRoute({
   method: 'get',
   path: '/api/hk47/metrics',
@@ -3656,6 +3661,47 @@ export function registerApiRoutes(
     } catch (error) {
       return apiError(c, 500, `Metrics failed: ${(error as Error).message}`);
     }
+  });
+
+  // POST /api/hk47/transcribe - dictation for the chat composer (PERS-23). The
+  // browser's recording goes to the ear's Whisper on the 3090 through
+  // hk47-voice-tunnel as it came (the ear decodes webm/opus itself), and the text
+  // comes back for Master to edit; nothing is sent to the agent, nothing is kept.
+  app.post('/api/hk47/transcribe', async c => {
+    let audio: unknown;
+    try {
+      audio = (await c.req.parseBody()).audio;
+    } catch {
+      return apiError(c, 400, 'Expected multipart form data with an audio field');
+    }
+    if (!(audio instanceof File) || audio.size === 0) {
+      return apiError(c, 400, 'Expected multipart form data with an audio field');
+    }
+    if (audio.size > EAR_MAX_BYTES) {
+      return apiError(c, 400, 'Recording too long for the ear (4 MB, about 16 minutes)');
+    }
+    let heard: { text?: string; segments?: { no_speech_prob?: number }[] };
+    try {
+      const reply = await fetch(`${EAR_URL}/hear`, {
+        method: 'POST',
+        headers: { 'Content-Type': audio.type || 'application/octet-stream' },
+        body: await audio.arrayBuffer(),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!reply.ok) return apiError(c, 503, `The ear answered ${String(reply.status)}`);
+      heard = (await reply.json()) as typeof heard;
+    } catch (error) {
+      getLog().warn({ err: error }, 'hk47_transcribe_ear_unreachable');
+      return apiError(c, 503, 'The ear is unreachable: is hk47-voice-tunnel running?');
+    }
+    // Whisper hears "Thank you." or "you" in silence; a clip whose every segment
+    // scores above the line is silence (measured 2026-09-28, the overseer's rule).
+    // ponytail: whole-clip only, so a long dictation keeps a hallucinated word from
+    // a silent stretch; per-segment text from the ear if that shows up in practice.
+    const segments = heard.segments ?? [];
+    const silent =
+      segments.length === 0 || segments.every(seg => (seg.no_speech_prob ?? 0) > EAR_SILENT_ABOVE);
+    return c.json({ text: silent ? '' : (heard.text ?? '').trim() });
   });
 
   // GET /api/workflows - Discover available workflows
