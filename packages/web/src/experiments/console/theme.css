@@ -192,3 +192,110 @@
 .console-root .brand-bar-soft {
   background: var(--brand-gradient-soft);
 }
+
+/* Chat tables: a faint band on alternate rows and a warm hover, both read off
+   the surface tokens so they follow the light/dark switch. */
+.console-root .md-table tbody tr:nth-child(even) {
+  background: color-mix(in oklch, var(--surface-inset) 55%, transparent);
+}
+.console-root .md-table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+/*
+ * Light mode: the same livery by daylight, not a white page. Surfaces are warm
+ * parchment on the charcoal's hue (50-75), text is the charcoal itself, and
+ * every brand and status hue keeps its angle but drops in lightness so it holds
+ * contrast on a pale ground. Set on <html data-console-theme> (lib/theme.ts).
+ */
+html[data-console-theme='light'] .console-root {
+  --surface: oklch(0.925 0.014 72);
+  --surface-inset: oklch(0.895 0.018 68);
+  --surface-elevated: oklch(0.952 0.011 76);
+  --surface-hover: oklch(0.9 0.019 66);
+  --surface-variant: oklch(0.91 0.017 68);
+  --surface-bright: oklch(0.865 0.022 64);
+
+  --border: oklch(0.83 0.022 62);
+  --border-bright: oklch(0.75 0.028 58);
+  --outline-variant: oklch(0.69 0.03 56);
+
+  --text-primary: oklch(0.24 0.018 50);
+  --text-secondary: oklch(0.42 0.022 52);
+  --text-tertiary: oklch(0.54 0.022 54);
+
+  --brand-magenta: oklch(0.56 0.13 50);
+  --brand-magenta-2: oklch(0.6 0.115 62);
+  --brand-violet: oklch(0.5 0.06 232);
+  --brand-teal: oklch(0.54 0.11 162);
+  --brand-teal-2: oklch(0.5 0.1 165);
+  --brand-gradient-soft: linear-gradient(
+    135deg,
+    oklch(0.56 0.195 28 / 0.12) 0%,
+    oklch(0.56 0.13 50 / 0.09) 50%,
+    oklch(0.6 0.115 62 / 0.12) 100%
+  );
+
+  --accent-hover: oklch(0.5 0.135 48);
+  --accent-muted: oklch(0.56 0.13 50 / 0.28);
+  --accent-soft: oklch(0.56 0.13 50 / 0.1);
+  --accent-ring: oklch(0.56 0.13 50 / 0.32);
+
+  --running: oklch(0.55 0.16 248);
+  --running-soft: oklch(0.55 0.16 248 / 0.12);
+  --success-soft: oklch(0.54 0.11 162 / 0.12);
+  --warning: oklch(0.62 0.14 72);
+  --warning-soft: oklch(0.62 0.14 72 / 0.14);
+  --error: oklch(0.55 0.2 25);
+  --error-soft: oklch(0.55 0.2 25 / 0.12);
+
+  --account-personal: oklch(0.58 0.15 45);
+  --account-work: oklch(0.52 0.16 300);
+
+  --chart-1: oklch(0.56 0.13 50);
+  --chart-2: oklch(0.52 0.11 165);
+  --chart-3: oklch(0.5 0.15 300);
+  --chart-4: oklch(0.58 0.12 95);
+  --chart-5: oklch(0.52 0.13 245);
+  --chart-6: oklch(0.52 0.15 345);
+
+  --background: oklch(0.905 0.016 68);
+  color-scheme: light;
+}
+
+/* highlight.js ships github-dark-dimmed globally; by daylight its pale tokens
+   vanish, so the token colours are restated in the livery's darker register. */
+html[data-console-theme='light'] .console-root .hljs {
+  color: var(--text-primary);
+}
+html[data-console-theme='light']
+  .console-root
+  :is(.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-doctag) {
+  color: oklch(0.5 0.17 28);
+}
+html[data-console-theme='light'] .console-root :is(.hljs-string, .hljs-regexp, .hljs-addition) {
+  color: oklch(0.47 0.11 150);
+}
+html[data-console-theme='light']
+  .console-root
+  :is(.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet) {
+  color: oklch(0.5 0.13 250);
+}
+html[data-console-theme='light'] .console-root :is(.hljs-title, .hljs-section, .hljs-name) {
+  color: oklch(0.47 0.14 300);
+}
+html[data-console-theme='light']
+  .console-root
+  :is(.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-template-variable) {
+  color: oklch(0.48 0.1 232);
+}
+html[data-console-theme='light'] .console-root :is(.hljs-type, .hljs-class, .hljs-meta) {
+  color: oklch(0.52 0.12 60);
+}
+html[data-console-theme='light'] .console-root :is(.hljs-comment, .hljs-quote) {
+  color: oklch(0.58 0.02 60);
+  font-style: italic;
+}
+html[data-console-theme='light'] .console-root .hljs-deletion {
+  color: oklch(0.55 0.2 25);
+}

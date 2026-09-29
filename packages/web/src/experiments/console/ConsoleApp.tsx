@@ -15,7 +15,10 @@ import { invalidate } from './store/cache';
 import { K } from './store/keys';
 import { useKeymap, type Binding } from './lib/keymap';
 import { SHORTCUTS } from './lib/shortcuts';
+import { applyConsoleTheme } from './lib/theme';
 import './theme.css';
+
+applyConsoleTheme();
 
 /**
  * Console experiment shell.

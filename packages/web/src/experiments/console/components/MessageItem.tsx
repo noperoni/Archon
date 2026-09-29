@@ -69,6 +69,39 @@ const MD_COMPONENTS: Components = {
       {children}
     </blockquote>
   ),
+  // Tables: Tailwind's reset strips every border and alignment, which is what
+  // made a GFM table read as loose columns of text. Alignment from the
+  // markdown (:--:) arrives as the cell's style and is passed through.
+  table: ({ children }) => (
+    <div className="md-table my-2 overflow-x-auto rounded-[9px] border border-border">
+      <table className="w-full border-collapse text-[13.5px]">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-surface-inset">{children}</thead>,
+  th: ({ children, style }) => (
+    <th
+      style={style}
+      className="border-b border-border px-3 py-1.5 text-left font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] whitespace-nowrap text-text-tertiary"
+    >
+      {children}
+    </th>
+  ),
+  td: ({ children, style }) => (
+    <td style={style} className="border-t border-border px-3 py-1.5 align-top leading-snug">
+      {children}
+    </td>
+  ),
+  hr: () => <hr className="my-3 border-0 border-t border-border" />,
+  strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
+  del: ({ children }) => <del className="text-text-tertiary">{children}</del>,
+  input: ({ checked }) => (
+    <input
+      type="checkbox"
+      checked={checked}
+      readOnly
+      className="mr-1.5 translate-y-[1px] accent-[var(--accent)]"
+    />
+  ),
 };
 
 const ERROR_BLOCK = (msg: string): ReactElement => (
@@ -120,7 +153,7 @@ export function MessageItem({ message, variant = 'chat' }: MessageItemProps): Re
           style={{
             background: 'color-mix(in oklch, var(--brand-magenta), transparent 94%)',
             border: '1px solid color-mix(in oklch, var(--brand-magenta), transparent 50%)',
-            color: 'color-mix(in oklch, white, var(--brand-magenta) 12%)',
+            color: 'color-mix(in oklch, var(--text-primary), var(--brand-magenta) 12%)',
             boxShadow: '0 0 0 4px color-mix(in oklch, var(--brand-magenta), transparent 95%)',
           }}
         >

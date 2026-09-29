@@ -1,6 +1,16 @@
 import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router';
-import { Settings, Workflow, ArrowLeft, PenTool, BarChart3, type LucideIcon } from 'lucide-react';
+import {
+  Settings,
+  Workflow,
+  ArrowLeft,
+  PenTool,
+  BarChart3,
+  Sun,
+  Moon,
+  type LucideIcon,
+} from 'lucide-react';
+import { setConsoleTheme, useConsoleTheme } from '../lib/theme';
 import { ProjectRow } from './ProjectRow';
 import { EnvVarsDialog } from './EnvVarsDialog';
 import { useEntity, invalidate } from '../store/cache';
@@ -202,6 +212,7 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
           <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-text-tertiary">
             console
           </span>
+          <ThemeToggle />
         </div>
         <div className="flex items-center gap-2 px-1 pb-3">
           <span className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-text-tertiary">
@@ -416,5 +427,27 @@ export function ProjectRail({ onAddProject }: ProjectRailProps): ReactElement {
         }}
       />
     </nav>
+  );
+}
+
+function ThemeToggle(): ReactElement {
+  const theme = useConsoleTheme();
+  const next = theme === 'dark' ? 'light' : 'dark';
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        setConsoleTheme(next);
+      }}
+      title={`Switch to ${next} mode`}
+      aria-label={`Switch to ${next} mode`}
+      className="rounded-full border border-border p-1 text-text-tertiary transition-colors hover:bg-surface-hover hover:text-accent-bright"
+    >
+      {theme === 'dark' ? (
+        <Sun size={12} strokeWidth={2} aria-hidden />
+      ) : (
+        <Moon size={12} strokeWidth={2} aria-hidden />
+      )}
+    </button>
   );
 }

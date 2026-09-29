@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import type { Components } from 'react-markdown';
+import { useConsoleTheme } from '../lib/theme';
 
 /**
  * Fenced `mermaid` and `vega-lite` blocks render as graphics, in chat and in
@@ -52,16 +53,21 @@ function tokenIn(name: string, scope: Element): string {
 }
 
 let mermaidReady: Promise<typeof import('mermaid').default> | null = null;
+let mermaidTheme = '';
 
+/** Mermaid reads its palette once at initialize(), so a theme switch re-initializes it. */
 function loadMermaid(scope: Element): Promise<typeof import('mermaid').default> {
   const token = (name: string): string => tokenIn(name, scope);
+  const theme = document.documentElement.dataset.consoleTheme ?? 'dark';
+  if (theme !== mermaidTheme) mermaidReady = null;
+  mermaidTheme = theme;
   mermaidReady ??= import('mermaid').then(({ default: mermaid }) => {
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
       theme: 'base',
       themeVariables: {
-        darkMode: true,
+        darkMode: theme !== 'light',
         background: token('--surface'),
         primaryColor: token('--surface-elevated'),
         primaryTextColor: token('--text-primary'),
@@ -114,7 +120,9 @@ async function renderVegaSpec(el: HTMLElement, spec: Record<string, unknown>): P
   const result = await embed(el, spec, {
     actions: false,
     renderer: 'svg',
-    tooltip: { theme: 'dark' },
+    tooltip: {
+      theme: document.documentElement.dataset.consoleTheme === 'light' ? 'light' : 'dark',
+    },
     config: {
       background: 'transparent',
       font: getComputedStyle(document.body).fontFamily,
@@ -151,6 +159,7 @@ async function renderVega(el: HTMLElement, source: string): Promise<() => void> 
 export function VegaChart({ spec }: { spec: Record<string, unknown> }): ReactElement {
   const ref = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const theme = useConsoleTheme();
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -168,7 +177,7 @@ export function VegaChart({ spec }: { spec: Record<string, unknown> }): ReactEle
       cancelled = true;
       cleanup?.();
     };
-  }, [spec]);
+  }, [spec, theme]);
   return failed ? (
     <p className="text-[12px] text-text-tertiary">Chart failed: {failed}</p>
   ) : (
@@ -189,6 +198,7 @@ function Graphic({
   // Until a render succeeds the code block shows, so a streaming fence reads
   // as code arriving rather than as an empty frame.
   const [drawn, setDrawn] = useState(false);
+  const theme = useConsoleTheme();
 
   useEffect(() => {
     const el = ref.current;
@@ -214,7 +224,7 @@ function Graphic({
       clearTimeout(timer);
       cleanup?.();
     };
-  }, [lang, source]);
+  }, [lang, source, theme]);
 
   return (
     <>
