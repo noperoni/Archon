@@ -831,6 +831,8 @@ const answerQuestionRoute = createRoute({
 });
 
 // The Agents tab reads the sessions active in the last week, at most this many.
+// HK-47 fork: bound on a sent message's typed form, which is ours to store.
+const MAX_DISPLAY_CHARS = 100_000;
 const SUBAGENT_WINDOW_MS = 7 * 24 * 3600_000;
 const SUBAGENT_SESSIONS = 20;
 
@@ -3210,6 +3212,9 @@ export function registerApiRoutes(
     }
 
     let message: string;
+    // HK-47 fork: the typed form, `[Pasted text #N +K lines]` tokens unexpanded.
+    // History draws it; the agent only ever sees `message`.
+    let display: unknown;
     let savedFiles: AttachedFile[] = [];
     let uploadDir = '';
 
@@ -3229,6 +3234,7 @@ export function registerApiRoutes(
         return c.json({ error: 'message must be a non-empty string' }, 400);
       }
       message = rawMessage;
+      display = body.display;
 
       const rawFiles = body.files;
       let fileList: (string | File)[];
@@ -3251,7 +3257,7 @@ export function registerApiRoutes(
         getLog().info({ conversationId, fileCount: savedFiles.length }, 'message.files_uploaded');
       }
     } else {
-      let body: { message?: unknown };
+      let body: { message?: unknown; display?: unknown };
       try {
         body = await c.req.json();
       } catch (parseErr: unknown) {
@@ -3263,6 +3269,7 @@ export function registerApiRoutes(
         return c.json({ error: 'message must be a non-empty string' }, 400);
       }
       message = body.message;
+      display = body.display;
     }
 
     // Look up conversation for message persistence
@@ -3277,12 +3284,21 @@ export function registerApiRoutes(
     if (conv) {
       // Omit path from persisted metadata — the on-disk file is ephemeral and will be
       // deleted after the AI processes it; storing stale paths would confuse future readers.
-      const meta =
-        savedFiles.length > 0
-          ? { files: savedFiles.map(f => ({ name: f.name, mimeType: f.mimeType, size: f.size })) }
-          : undefined;
+      const meta: Record<string, unknown> = {};
+      if (savedFiles.length > 0) {
+        meta.files = savedFiles.map(f => ({ name: f.name, mimeType: f.mimeType, size: f.size }));
+      }
+      if (typeof display === 'string' && display.length > 0 && display !== message) {
+        meta.display = display.slice(0, MAX_DISPLAY_CHARS);
+      }
       try {
-        await messageDb.addMessage(conv.id, 'user', message, meta, userId);
+        await messageDb.addMessage(
+          conv.id,
+          'user',
+          message,
+          Object.keys(meta).length > 0 ? meta : undefined,
+          userId
+        );
       } catch (e: unknown) {
         getLog().error({ err: e, conversationId: conv.id }, 'message_persistence_failed');
         try {

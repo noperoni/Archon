@@ -162,29 +162,54 @@ const ERROR_BLOCK = (msg: string): ReactElement => (
 // Past this many lines a sent message folds, the way the terminal folds a paste.
 const FOLD_OVER_LINES = 14;
 const FOLD_SHOW_LINES = 8;
-const IMAGE_TOKEN = /(\[Image #\d+\])/;
+// The terminal's tokens: split() puts the matches at the odd indices.
+const TOKEN = /(\[Image #\d+\]|\[Pasted text #\d+(?: \+\d+ lines)?\])/;
+const CHIP_BG = { background: 'color-mix(in oklch, var(--brand-magenta), transparent 80%)' };
 
-function UserText({ content }: { content: string }): ReactElement {
+/**
+ * A sent message as the terminal leaves it in the scrollback: typed text with
+ * its paste tokens, when the row carries that form (HK-47 fork). A token opens
+ * the full text the agent received.
+ */
+function UserText({ content, display }: { content: string; display: string | null }): ReactElement {
   const [open, setOpen] = useState(false);
-  const lines = content.split('\n');
+  const [pastesOpen, setPastesOpen] = useState(false);
+  const typed = display !== null && !pastesOpen;
+  const text = typed ? display.trim() : content;
+  const lines = text.split('\n');
   const folded = !open && lines.length > FOLD_OVER_LINES;
-  const shown = folded ? lines.slice(0, FOLD_SHOW_LINES).join('\n') : content;
+  const shown = folded ? lines.slice(0, FOLD_SHOW_LINES).join('\n') : text;
   return (
     <>
       <span className="whitespace-pre-wrap">
-        {shown.split(IMAGE_TOKEN).map((part, i) =>
-          IMAGE_TOKEN.test(part) ? (
+        {shown.split(TOKEN).map((part, i) => {
+          if (i % 2 === 0) return part;
+          if (typed && part.startsWith('[Pasted')) {
+            return (
+              <button
+                key={i}
+                type="button"
+                title="Show the pasted text"
+                onClick={() => {
+                  setPastesOpen(true);
+                }}
+                className="rounded px-[5px] py-[1px] font-mono text-[12px] hover:brightness-125"
+                style={CHIP_BG}
+              >
+                {part}
+              </button>
+            );
+          }
+          return (
             <span
               key={i}
               className="rounded px-[5px] py-[1px] font-mono text-[12px]"
-              style={{ background: 'color-mix(in oklch, var(--brand-magenta), transparent 80%)' }}
+              style={CHIP_BG}
             >
               {part}
             </span>
-          ) : (
-            part
-          )
-        )}
+          );
+        })}
       </span>
       {lines.length > FOLD_OVER_LINES ? (
         <button
@@ -195,6 +220,17 @@ function UserText({ content }: { content: string }): ReactElement {
           className="mt-1 block font-mono text-[11px] text-text-tertiary hover:text-text-primary"
         >
           {open ? '▴ fold' : `… +${String(lines.length - FOLD_SHOW_LINES)} lines`}
+        </button>
+      ) : null}
+      {display !== null && pastesOpen ? (
+        <button
+          type="button"
+          onClick={() => {
+            setPastesOpen(false);
+          }}
+          className="mt-1 block font-mono text-[11px] text-text-tertiary hover:text-text-primary"
+        >
+          ▴ fold pastes
         </button>
       ) : null}
     </>
@@ -209,6 +245,7 @@ const messageItem = memo(
     a.message.id === b.message.id &&
     a.message.role === b.message.role &&
     a.message.content === b.message.content &&
+    a.message.display === b.message.display &&
     a.message.timestamp === b.message.timestamp &&
     a.message.error?.message === b.message.error?.message
 );
@@ -254,7 +291,7 @@ function MessageItemView({
             boxShadow: '0 0 0 4px color-mix(in oklch, var(--brand-magenta), transparent 95%)',
           }}
         >
-          <UserText content={content} />
+          <UserText content={content} display={message.display} />
         </div>
         {message.error !== null ? ERROR_BLOCK(message.error.message) : null}
       </div>

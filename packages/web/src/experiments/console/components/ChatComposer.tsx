@@ -21,7 +21,8 @@ import { transcribe } from '../skills/voice';
 import type { SlashCommand } from '../skills/conversations';
 
 interface ChatComposerProps {
-  onSend: (message: string, files?: File[]) => void;
+  /** `display` is the message as typed, paste tokens unexpanded, when it differs. */
+  onSend: (message: string, files?: File[], display?: string) => void;
   disabled: boolean;
   disabledReason?: string;
   /** The project's skills and commands, offered when the message starts with `/`. */
@@ -459,7 +460,11 @@ export function ChatComposer({
     let expanded = trimmed;
     for (const [token, text] of pastesRef.current) expanded = expanded.split(token).join(text);
     pastesRef.current.clear();
-    onSend(expanded, files.length > 0 ? files.map(f => f.file) : undefined);
+    onSend(
+      expanded,
+      files.length > 0 ? files.map(f => f.file) : undefined,
+      expanded === trimmed ? undefined : trimmed
+    );
     setValue('');
     setFiles([]);
     setFileError(null);

@@ -124,13 +124,18 @@ export const pendingQuestionListSchema = z
 
 /** POST /api/conversations/:id/message JSON request body. */
 export const sendMessageBodySchema = z
-  .object({ message: z.string().min(1) })
+  .object({
+    message: z.string().min(1),
+    // HK-47 fork: the message as typed, paste tokens unexpanded, for the history.
+    display: z.string().optional(),
+  })
   .openapi('SendMessageBody');
 
 /** POST /api/conversations/:id/message multipart request body (file uploads). */
 export const sendMessageMultipartSchema = z
   .object({
     message: z.string().min(1),
+    display: z.string().optional(),
     files: z
       .array(z.string().openapi({ format: 'binary' }))
       .max(5)

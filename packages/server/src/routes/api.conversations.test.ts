@@ -466,6 +466,50 @@ describe('POST /api/conversations with message (atomic create+send)', () => {
 // e.g. "CyberFitz-LLC/devops-platform#24" — these must be URL-encoded by the client
 // and correctly decoded by the server route params.
 // Ref: https://github.com/coleam00/Archon/issues/476
+// HK-47 fork (PERS-26): the history keeps the message as typed.
+describe('POST /api/conversations/:id/message typed form', () => {
+  const mockLockManager = {
+    acquireLock: mock(async (_convId: string, fn: () => Promise<void>) => {
+      await fn();
+      return { status: 'started' as const };
+    }),
+  } as unknown as ConversationLockManager;
+  const mockWebAdapter = {
+    setConversationDbId: mock((_platformId: string, _dbId: string) => {}),
+    emitLockEvent: mock((_convId: string, _locked: boolean) => {}),
+    emitSSE: mock(async (_convId: string, _data: string) => {}),
+  } as unknown as WebAdapter;
+
+  const send = async (body: Record<string, unknown>): Promise<unknown[]> => {
+    mockFindConversationByPlatformId.mockImplementationOnce(async () => MOCK_CONV);
+    const before = mockAddMessage.mock.calls.length;
+    const app = new OpenAPIHono({ defaultHook: validationErrorHook });
+    registerApiRoutes(app, mockWebAdapter, mockLockManager);
+    const response = await app.request('/api/conversations/web-test-abc/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(200);
+    expect(mockAddMessage.mock.calls.length).toBe(before + 1);
+    return mockAddMessage.mock.calls[before] as unknown[];
+  };
+
+  test('stores the tokenised form as metadata.display, the full text as content', async () => {
+    const call = await send({
+      message: 'look at this:\nline one\nline two',
+      display: 'look at this: [Pasted text #1 +1 lines]',
+    });
+    expect(call[2]).toBe('look at this:\nline one\nline two');
+    expect(call[3]).toEqual({ display: 'look at this: [Pasted text #1 +1 lines]' });
+  });
+
+  test('stores no metadata when there is no typed form', async () => {
+    const call = await send({ message: 'plain' });
+    expect(call[3]).toBeUndefined();
+  });
+});
+
 describe('GET /api/conversations/:id — forge platform IDs with encoded slashes', () => {
   const GITEA_CONV = {
     id: 'gitea-internal-uuid',

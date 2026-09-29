@@ -48,6 +48,8 @@ export interface Message {
   id: string;
   role: MessageRole;
   content: string;
+  /** HK-47 fork: a user message as typed, `[Pasted text #N]` tokens unexpanded. */
+  display: string | null;
   timestamp: string;
   toolCalls: InlineToolCall[];
   error: InlineError | null;
@@ -76,6 +78,7 @@ interface ParsedMetadata {
     duration?: number;
   }[];
   category?: string;
+  display?: unknown;
   workflowDispatch?: {
     workflowName: string;
     workerConversationId?: string;
@@ -146,6 +149,7 @@ export function toMessage(raw: RawMessage): Message {
     id: raw.id,
     role: toMessageRole(raw.role),
     content: raw.content,
+    display: typeof meta.display === 'string' ? meta.display : null,
     timestamp: raw.created_at,
     toolCalls,
     error,

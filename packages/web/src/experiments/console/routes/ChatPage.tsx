@@ -285,9 +285,14 @@ export function ChatPage(): ReactElement {
 
   // The sent message shows at once, as the terminal echoes it, until the
   // refetched history carries it. `after` is how many rows existed at send.
-  const [echo, setEcho] = useState<{ text: string; at: string; after: number } | null>(null);
+  const [echo, setEcho] = useState<{
+    text: string;
+    display: string | null;
+    at: string;
+    after: number;
+  } | null>(null);
 
-  const onSend = (text: string, files?: File[]): void => {
+  const onSend = (text: string, files?: File[], display?: string): void => {
     if (projectId === undefined) return;
     setError(null);
     setNotice(null);
@@ -295,6 +300,7 @@ export function ChatPage(): ReactElement {
     sendingRef.current = true;
     setEcho({
       text,
+      display: display ?? null,
       at: new Date().toISOString(),
       after: activeConvId === null ? 0 : (messages ?? []).length,
     });
@@ -302,11 +308,12 @@ export function ChatPage(): ReactElement {
     void (async (): Promise<void> => {
       try {
         if (activeConvId === null) {
-          // createConversation is JSON-only, so a first message carrying files
-          // opens the conversation empty and then sends like any other.
-          const withFiles = files !== undefined && files.length > 0;
-          const conv = await skill.createConversation(projectId, withFiles ? undefined : text);
-          if (withFiles) await skill.sendMessage(conv.conversationId, text, files);
+          // createConversation is JSON-only and keeps no typed form, so a first
+          // message carrying files or paste tokens opens the conversation empty
+          // and then sends like any other.
+          const viaSend = (files !== undefined && files.length > 0) || display !== undefined;
+          const conv = await skill.createConversation(projectId, viaSend ? undefined : text);
+          if (viaSend) await skill.sendMessage(conv.conversationId, text, files, display);
           setActiveConvId(conv.conversationId);
           invalidate(K.conversations(projectId));
           invalidate(K.messages(conv.conversationId));
@@ -321,7 +328,7 @@ export function ChatPage(): ReactElement {
               .map(q => skill.dismissQuestion(activeConvId, q.toolUseId).catch(() => undefined))
           );
           invalidate(K.questions(activeConvId));
-          await skill.sendMessage(activeConvId, text, files);
+          await skill.sendMessage(activeConvId, text, files, display);
           invalidate(K.messages(activeConvId));
         }
       } catch (e: unknown) {
@@ -411,6 +418,7 @@ export function ChatPage(): ReactElement {
             id: 'echo',
             role: 'user',
             content: echo.text,
+            display: echo.display,
             timestamp: echo.at,
             toolCalls: [],
             error: null,

@@ -111,3 +111,19 @@ describe('isSystemCategory', () => {
     expect(isSystemCategory('tool_call_formatted')).toBe(false);
   });
 });
+
+// HK-47 fork (PERS-26): a sent message keeps its typed form for the history.
+describe('toMessage — display', () => {
+  test('carries metadata.display when it is a string', () => {
+    const m = toMessage(
+      raw({ id: 'u1', role: 'user', content: 'a\nb\nc' }, { display: '[Pasted text #1 +2 lines]' })
+    );
+    expect(m.display).toBe('[Pasted text #1 +2 lines]');
+    expect(m.content).toBe('a\nb\nc');
+  });
+
+  test('anything else yields null', () => {
+    expect(toMessage(raw({ id: 'u2' })).display).toBeNull();
+    expect(toMessage(raw({ id: 'u3' }, { display: 42 })).display).toBeNull();
+  });
+});
