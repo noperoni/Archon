@@ -23,6 +23,7 @@ export const K = {
   questions: (conversationId: string): string => `questions:${conversationId}`,
   conversations: (projectId: string): string => `conversations:${projectId}`,
   claudeSessions: (projectId: string): string => `claudeSessions:${projectId}`,
+  commands: (projectId: string): string => `commands:${projectId}`,
   countsGlobal: 'counts:global' as const,
   pendingRuns: 'pendingRuns' as const,
   envVars: (projectId: string): string => `envVars:${projectId}`,

@@ -338,7 +338,9 @@ import {
   envVarMutationResponseSchema,
   claudeSessionListResponseSchema,
   claudeSessionParamsSchema,
+  claudeCommandListResponseSchema,
 } from './schemas/codebase.schemas';
+import { listClaudeSlashCommands } from '@archon/core/services/claude-commands';
 import {
   ACCOUNT_CONFIG_DIRS,
   type ClaudeAccount,
@@ -916,6 +918,21 @@ const listClaudeSessionsRoute = createRoute({
     200: {
       content: { 'application/json': { schema: claudeSessionListResponseSchema } },
       description: 'Transcripts for the project',
+    },
+    404: jsonError('Codebase not found'),
+  },
+});
+
+const listClaudeCommandsRoute = createRoute({
+  method: 'get',
+  path: '/api/codebases/{id}/commands',
+  tags: ['Codebases'],
+  summary: "The slash commands the project's terminal would offer: skills, commands, plugins",
+  request: { params: codebaseIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: claudeCommandListResponseSchema } },
+      description: 'Commands, sorted by name',
     },
     404: jsonError('Codebase not found'),
   },
@@ -3554,6 +3571,23 @@ export function registerApiRoutes(
     } catch (error) {
       getLog().error({ err: error, codebaseId: id }, 'list_claude_sessions_failed');
       return apiError(c, 500, 'Failed to list Claude sessions');
+    }
+  });
+
+  // GET /api/codebases/:id/commands - slash autocomplete for the console composer
+  registerOpenApiRoute(listClaudeCommandsRoute, async c => {
+    const id = c.req.param('id') ?? '';
+    try {
+      const codebase = await codebaseDb.getCodebase(id);
+      if (!codebase) return apiError(c, 404, 'Codebase not found');
+      const commands = await listClaudeSlashCommands(
+        codebase.default_cwd,
+        await claudeConfigDirOf(id)
+      );
+      return c.json({ commands });
+    } catch (error) {
+      getLog().error({ err: error, codebaseId: id }, 'list_claude_commands_failed');
+      return apiError(c, 500, 'Failed to list commands');
     }
   });
 

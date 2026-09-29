@@ -66,6 +66,20 @@ export const claudeSessionListResponseSchema = z
   })
   .openapi('ClaudeSessionListResponse');
 
+/** GET /api/codebases/:id/commands: the slash commands its terminal would offer (HK47 fork). */
+export const claudeCommandListResponseSchema = z
+  .object({
+    commands: z.array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        argumentHint: z.string().optional(),
+        source: z.enum(['project', 'user', 'plugin']),
+      })
+    ),
+  })
+  .openapi('ClaudeCommandListResponse');
+
 export const claudeSessionParamsSchema = z.object({ id: z.string(), sessionId: z.string() });
 
 /** Body for PUT /api/codebases/:id/env — upsert one key-value pair */

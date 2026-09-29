@@ -16,7 +16,7 @@ import type { Project } from '../primitives/project';
 import type { Message } from '../primitives/message';
 import { QUESTION_POLL_MS, type PendingQuestion } from '../skills/messages';
 import type { ConversationSummary } from '../primitives/conversation';
-import type { ClaudeSession } from '../skills/conversations';
+import type { ClaudeSession, SlashCommand } from '../skills/conversations';
 
 const NEW_CONVERSATION = '__new';
 const TERMINAL_PREFIX = 'claude:';
@@ -76,6 +76,12 @@ export function ChatPage(): ReactElement {
       clearTimeout(id);
     };
   }, [projectId, claudeSessionsError]);
+
+  // Slash autocomplete: the skills and commands this project's terminal offers.
+  const { data: commands } = useEntity<SlashCommand[]>(
+    projectId !== undefined ? K.commands(projectId) : 'noop:no-project-commands',
+    () => (projectId !== undefined ? skill.listCommands(projectId) : Promise.resolve([]))
+  );
 
   // Active conversation: most-recent web conversation, else null until first send.
   // `picked` stops that default from overriding an explicit "New conversation".
@@ -497,7 +503,7 @@ export function ChatPage(): ReactElement {
         </div>
       ) : null}
 
-      <ChatComposer onSend={onSend} disabled={busy} />
+      <ChatComposer onSend={onSend} disabled={busy} commands={commands} />
     </section>
   );
 }

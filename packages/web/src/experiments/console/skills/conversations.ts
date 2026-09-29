@@ -99,6 +99,21 @@ export async function listClaudeSessions(projectId: string): Promise<ClaudeSessi
   return res.sessions;
 }
 
+/** A slash command the project's terminal would offer (skill, command or plugin). */
+export interface SlashCommand {
+  name: string;
+  description: string;
+  argumentHint?: string;
+  source: 'project' | 'user' | 'plugin';
+}
+
+export async function listCommands(projectId: string): Promise<SlashCommand[]> {
+  const res = await requestJson<{ commands: SlashCommand[] }>(
+    `/api/codebases/${encodeURIComponent(projectId)}/commands`
+  );
+  return res.commands;
+}
+
 /** Open a terminal session as a web conversation that resumes it. */
 export async function resumeClaudeSession(
   projectId: string,
