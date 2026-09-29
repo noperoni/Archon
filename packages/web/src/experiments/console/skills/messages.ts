@@ -8,6 +8,14 @@ export async function listMessages(conversationId: string, limit = 500): Promise
   return raw.map(toMessage);
 }
 
+/** HK-47 fork: a turn is running or queued, read from the server's lock. */
+export async function isRunning(conversationId: string): Promise<boolean> {
+  const res = await requestJson<{ running: boolean }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/running`
+  );
+  return res.running;
+}
+
 /** How often an open chat or live run page re-reads its pending questions. */
 export const QUESTION_POLL_MS = 5000;
 

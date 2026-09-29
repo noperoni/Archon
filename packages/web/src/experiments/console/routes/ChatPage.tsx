@@ -26,15 +26,11 @@ const TERMINAL_PREFIX = 'claude:';
 // still surface if a per-conversation SSE event is dropped (cross-origin
 // EventSource in dev can miss bursts). Mirrors RunDetailPage's safety-net poll.
 const ACTIVE_POLL_MS = 3000;
-// Consider the turn done once the trailing message is an assistant reply that
-// has stayed stable this long. Independent of any SSE lock event.
-const SETTLE_MS = 6000;
-// Hard cap so a turn that never produces a reply (server error, etc.) can't
-// disable the composer forever.
-const MAX_WAIT_MS = 300_000;
 // Distance from the bottom (px) within which we treat the scroll as "at bottom"
 // — drives both auto-scroll stickiness and the jump-to-bottom button's visibility.
 const NEAR_BOTTOM_PX = 120;
+// The trace toggle outlives a reload; it defaults on, as the terminal shows it.
+const TRACE_KEY = 'hk47.chat.trace';
 
 /**
  * Project-scoped agent chat. A tab peer of the runs view under a project.
@@ -98,6 +94,7 @@ export function ChatPage(): ReactElement {
     if (projectId === undefined) return;
     setPicked(true);
     setError(null);
+    setEcho(null);
     if (value === NEW_CONVERSATION) {
       setActiveConvId(null);
       return;
@@ -187,114 +184,104 @@ export function ChatPage(): ReactElement {
     };
   }, [activeConvId]);
 
-  // `busy` = a reply is pending → composer disabled + recovery poll active.
-  // Driven by message content and the send action, NOT by the SSE lock event,
-  // so it stays correct even when the per-conversation SSE drops or never
-  // connects (which it can, cross-origin in dev). SSE is a pure accelerator.
+  // `busy` = a turn is running or queued → composer disabled + live poll.
+  // HK-47 fork: read from the server's conversation lock, not inferred from the
+  // messages. The old settle guess (trailing reply stable for 6s) cleared on any
+  // tool call longer than that and read a reload mid-turn as idle, which left a
+  // working session looking dead. The SSE lock event is a fast path on top.
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Non-error advisory (distinct channel from `error` so it doesn't read as a
-  // send failure) — e.g. files dropped from a first message.
+  // send failure).
   const [notice, setNotice] = useState<string | null>(null);
+  // A send in flight holds `busy`: the lock is not taken until the POST lands.
+  const sendingRef = useRef(false);
 
-  // Turn-completion state. The settle timer (below) is the correctness floor — it
-  // works even when SSE is absent. The SSE lock event is a fast-path on top of it.
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const settleSigRef = useRef('');
-
-  // SSE accelerator: invalidates the message cache on text/tool events, and via
-  // onLockChange clears `busy` the instant the server releases the conversation
-  // lock (conversation_lock:false) instead of waiting out SETTLE_MS. Must be
-  // useCallback-stable — the hook's effect depends on it, so an inline lambda
-  // would reconnect the EventSource on every render.
-  const onLockChange = useCallback((locked: boolean): void => {
-    if (locked) return;
-    if (settleTimerRef.current !== null) {
-      clearTimeout(settleTimerRef.current);
-      settleTimerRef.current = null;
-    }
-    setBusy(false);
+  const applyRunning = useCallback((running: boolean): void => {
+    if (running) setBusy(true);
+    else if (!sendingRef.current) setBusy(false);
   }, []);
+
+  // Must be useCallback-stable — the SSE hook's effect depends on it, so an
+  // inline lambda would reconnect the EventSource on every render.
+  const onLockChange = useCallback(
+    (locked: boolean): void => {
+      applyRunning(locked);
+    },
+    [applyRunning]
+  );
   useConversationSSE(activeConvId, onLockChange);
 
-  // Derive turn state from the trailing message: a user message means a reply
-  // is pending; once an assistant reply lands and stays stable for SETTLE_MS the
-  // turn is done. This also recovers a reload mid-turn (trailing user message).
+  // Ask the lock on open and then on a cadence: fast while a turn runs, when it
+  // also refetches in case an SSE event was dropped; slow while idle, so a turn
+  // started from another tab or before a reload still shows.
   useEffect(() => {
-    const list = messages ?? [];
-    const last = list[list.length - 1];
-    if (last === undefined) return;
-    if (last.role === 'user') {
-      settleSigRef.current = '';
-      if (settleTimerRef.current !== null) {
-        clearTimeout(settleTimerRef.current);
-        settleTimerRef.current = null;
-      }
-      setBusy(true);
+    if (activeConvId === null) {
+      setBusy(false);
       return;
     }
-    // Trailing message is an assistant/system reply. Arm the settle timer once;
-    // re-arm only on real content change so identical poll refetches (same sig)
-    // don't reset it forever.
-    const sig = `${list.length}:${last.id}`;
-    if (sig === settleSigRef.current) return;
-    settleSigRef.current = sig;
-    if (settleTimerRef.current !== null) clearTimeout(settleTimerRef.current);
-    settleTimerRef.current = setTimeout(() => {
-      setBusy(false);
-    }, SETTLE_MS);
-  }, [messages]);
-  useEffect(
-    () => (): void => {
-      if (settleTimerRef.current !== null) clearTimeout(settleTimerRef.current);
-    },
-    []
-  );
-
-  // Recovery poll: while a reply is pending, refetch messages on a cadence so a
-  // dropped or absent SSE event can't hide the reply. Hard-caps at MAX_WAIT_MS.
-  const busySinceRef = useRef(0);
-  useEffect(() => {
-    if (!busy || activeConvId === null) return;
-    busySinceRef.current = Date.now();
-    const id = setInterval(() => {
-      if (Date.now() - busySinceRef.current > MAX_WAIT_MS) {
-        setBusy(false);
-        return;
-      }
-      invalidate(K.messages(activeConvId));
-      invalidate(K.questions(activeConvId));
-    }, ACTIVE_POLL_MS);
+    let alive = true;
+    const check = (): void => {
+      skill.isRunning(activeConvId).then(
+        r => {
+          if (alive) applyRunning(r);
+        },
+        () => undefined
+      );
+    };
+    check();
+    const id = setInterval(
+      () => {
+        check();
+        if (busy) {
+          invalidate(K.messages(activeConvId));
+          invalidate(K.questions(activeConvId));
+        }
+      },
+      busy ? ACTIVE_POLL_MS : QUESTION_POLL_MS
+    );
     return (): void => {
+      alive = false;
       clearInterval(id);
     };
-  }, [busy, activeConvId]);
+  }, [busy, activeConvId, applyRunning]);
 
-  // Reveal the raw tool trace inline (toggled from the working indicator).
-  const [showTools, setShowTools] = useState(false);
+  // The inline tool trace, as the terminal draws it. On unless turned off.
+  const [showTools, setShowTools] = useState(() => localStorage.getItem(TRACE_KEY) !== 'off');
+  const toggleTrace = (): void => {
+    setShowTools(v => {
+      localStorage.setItem(TRACE_KEY, v ? 'off' : 'on');
+      return !v;
+    });
+  };
+
+  // The sent message shows at once, as the terminal echoes it, until the
+  // refetched history carries it. `after` is how many rows existed at send.
+  const [echo, setEcho] = useState<{ text: string; at: string; after: number } | null>(null);
 
   const onSend = (text: string, files?: File[]): void => {
     if (projectId === undefined) return;
     setError(null);
     setNotice(null);
     setBusy(true); // optimistic: disable the composer immediately
+    sendingRef.current = true;
+    setEcho({
+      text,
+      at: new Date().toISOString(),
+      after: activeConvId === null ? 0 : (messages ?? []).length,
+    });
     scrollToBottom();
     void (async (): Promise<void> => {
       try {
         if (activeConvId === null) {
-          const conv = await skill.createConversation(projectId, text);
+          // createConversation is JSON-only, so a first message carrying files
+          // opens the conversation empty and then sends like any other.
+          const withFiles = files !== undefined && files.length > 0;
+          const conv = await skill.createConversation(projectId, withFiles ? undefined : text);
+          if (withFiles) await skill.sendMessage(conv.conversationId, text, files);
           setActiveConvId(conv.conversationId);
           invalidate(K.conversations(projectId));
           invalidate(K.messages(conv.conversationId));
-          // createConversation is JSON-only — files can't ride the first message.
-          // Surface it as a non-error notice (not silently dropped); phrased so
-          // it's actionable once the agent replies (the composer is locked while
-          // `busy`), not "now".
-          if (files !== undefined && files.length > 0) {
-            setNotice(
-              "Files aren't attached to the first message of a new chat — re-attach and send them once the chat has started."
-            );
-          }
         } else {
           // A message sent over this turn's own question is the terminal's Esc
           // then a new prompt: without the dismissal the turn stays parked on
@@ -311,30 +298,50 @@ export function ChatPage(): ReactElement {
         }
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : 'Send failed.');
+        setEcho(null);
         setBusy(false); // unblock so the user can retry
+      } finally {
+        sendingRef.current = false;
       }
-      // On success `busy` stays true until the settle detector sees the reply.
+      // On success `busy` stays true until the lock reads free.
     })();
   };
 
   // Inline auto-scroll, mirroring RunDetailPage: follow intent belongs to user
   // scrolling, not post-render geometry, and a ResizeObserver on the content
   // follows a reply as it grows, not only when a new message row appears.
+  //
+  // Both sides are watched. The content grows as a reply arrives; the viewport
+  // shrinks when a question card, the workflow dock, a notice or a growing
+  // composer takes room below it, and nothing scrolls then, so without this the
+  // bottom of the stream slid out of sight behind whatever had appeared.
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastBottomRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
-  const contentRef = useCallback((node: HTMLDivElement | null): (() => void) | undefined => {
-    if (node === null) return undefined;
-    const observer = new ResizeObserver(() => {
-      if (!lastBottomRef.current) return;
-      const el = scrollRef.current;
-      if (el !== null) el.scrollTop = el.scrollHeight;
-    });
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-    };
+  const pinToBottom = useCallback((): void => {
+    if (!lastBottomRef.current) return;
+    const el = scrollRef.current;
+    if (el !== null) el.scrollTop = el.scrollHeight;
   }, []);
+  const observe = useCallback(
+    (node: HTMLDivElement | null): (() => void) | undefined => {
+      if (node === null) return undefined;
+      const observer = new ResizeObserver(pinToBottom);
+      observer.observe(node);
+      return () => {
+        observer.disconnect();
+      };
+    },
+    [pinToBottom]
+  );
+  const contentRef = observe;
+  const viewportRef = useCallback(
+    (node: HTMLDivElement | null): (() => void) | undefined => {
+      scrollRef.current = node;
+      return observe(node);
+    },
+    [observe]
+  );
 
   // A switched conversation or a sent message always resumes following.
   useEffect(() => {
@@ -363,7 +370,27 @@ export function ChatPage(): ReactElement {
     return <EmptyState title="No project selected." />;
   }
 
-  const messageList = messages ?? [];
+  const fetched = messages ?? [];
+  const echoed =
+    echo !== null &&
+    fetched.slice(echo.after).some(m => m.role === 'user' && m.content.trim() === echo.text);
+  const messageList: Message[] =
+    echo === null || echoed
+      ? fetched
+      : [
+          ...fetched,
+          {
+            id: 'echo',
+            role: 'user',
+            content: echo.text,
+            timestamp: echo.at,
+            toolCalls: [],
+            error: null,
+            category: null,
+            dispatch: null,
+            workflowResult: null,
+          },
+        ];
 
   // Surface a failed (re)load of the conversation list or message history — a
   // revalidation can fail silently (network blip, server restart) and otherwise
@@ -394,29 +421,42 @@ export function ChatPage(): ReactElement {
             </h1>
             <p className="text-xs text-text-tertiary">{project?.path ?? 'Loading…'}</p>
           </div>
-          <select
-            aria-label="Conversation"
-            value={activeConvId ?? NEW_CONVERSATION}
-            disabled={busy}
-            onChange={e => {
-              onPick(e.target.value);
-            }}
-            className="max-w-[320px] shrink-0 truncate rounded border border-border bg-surface-elevated px-2 py-1 text-xs text-text-secondary"
-          >
-            <option value={NEW_CONVERSATION}>New conversation</option>
-            {timeline.map(item => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleTrace}
+              aria-pressed={showTools}
+              title={
+                showTools ? 'Hide the tool trace' : 'Show every tool call, as the terminal does'
+              }
+              className="rounded border border-border bg-surface-elevated px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:text-text-primary"
+            >
+              {showTools ? '● trace' : '○ trace'}
+            </button>
+            <select
+              aria-label="Conversation"
+              value={activeConvId ?? NEW_CONVERSATION}
+              disabled={busy}
+              onChange={e => {
+                onPick(e.target.value);
+              }}
+              className="max-w-[320px] shrink-0 truncate rounded border border-border bg-surface-elevated px-2 py-1 text-xs text-text-secondary"
+            >
+              <option value={NEW_CONVERSATION}>New conversation</option>
+              {timeline.map(item => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <ProjectViewTabs projectId={projectId} active="chat" />
       </header>
 
       <div className="relative min-h-0 flex-1">
         <div
-          ref={scrollRef}
+          ref={viewportRef}
           onScroll={handleScroll}
           className="h-full overflow-y-auto px-[30px] pt-[26px] pb-[18px]"
         >
@@ -453,14 +493,33 @@ export function ChatPage(): ReactElement {
               />
             ) : (
               <StreamContextProvider value={{ runStartedAt: null }}>
-                <ChatStream messages={messageList} showTools={showTools} />
+                <ChatStream messages={messageList} showTools={showTools} live={busy} />
+                {/* Questions sit at the end of the stream, where the terminal puts
+                    them, and scroll with it, so the history above stays readable. */}
+                {activeConvId !== null
+                  ? (questions ?? []).map(q => (
+                      <div key={q.toolUseId} className="mt-[14px]">
+                        <QuestionCard
+                          pending={q}
+                          onAnswer={async (answers): Promise<void> => {
+                            await skill.answerQuestion(activeConvId, q.toolUseId, answers);
+                            invalidate(K.questions(activeConvId));
+                            invalidate(K.messages(activeConvId));
+                          }}
+                          onDismiss={async (): Promise<void> => {
+                            await skill.dismissQuestion(activeConvId, q.toolUseId);
+                            invalidate(K.questions(activeConvId));
+                            invalidate(K.messages(activeConvId));
+                          }}
+                        />
+                      </div>
+                    ))
+                  : null}
                 {busy ? (
                   <WorkingIndicator
                     activity={currentActivity}
                     expanded={showTools}
-                    onToggle={() => {
-                      setShowTools(v => !v);
-                    }}
+                    onToggle={toggleTrace}
                   />
                 ) : null}
               </StreamContextProvider>
@@ -479,27 +538,6 @@ export function ChatPage(): ReactElement {
           </button>
         ) : null}
       </div>
-
-      {activeConvId !== null && (questions ?? []).length > 0 ? (
-        <div className="mx-auto w-full max-w-[940px] shrink-0 px-[30px] pb-2">
-          {(questions ?? []).map(q => (
-            <QuestionCard
-              key={q.toolUseId}
-              pending={q}
-              onAnswer={async (answers): Promise<void> => {
-                await skill.answerQuestion(activeConvId, q.toolUseId, answers);
-                invalidate(K.questions(activeConvId));
-                invalidate(K.messages(activeConvId));
-              }}
-              onDismiss={async (): Promise<void> => {
-                await skill.dismissQuestion(activeConvId, q.toolUseId);
-                invalidate(K.questions(activeConvId));
-                invalidate(K.messages(activeConvId));
-              }}
-            />
-          ))}
-        </div>
-      ) : null}
 
       <WorkflowDock projectId={projectId} />
 

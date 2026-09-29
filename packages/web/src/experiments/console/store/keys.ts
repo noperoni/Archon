@@ -21,6 +21,7 @@ export const K = {
   run: (id: string): string => `run:${id}`,
   messages: (conversationId: string): string => `messages:${conversationId}`,
   questions: (conversationId: string): string => `questions:${conversationId}`,
+  running: (conversationId: string): string => `running:${conversationId}`,
   conversations: (projectId: string): string => `conversations:${projectId}`,
   claudeSessions: (projectId: string): string => `claudeSessions:${projectId}`,
   commands: (projectId: string): string => `commands:${projectId}`,

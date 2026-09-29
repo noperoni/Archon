@@ -49,6 +49,10 @@ const QUIET_OVER_FLOOR = 3;
 const QUIET_MIN_RMS = 0.004;
 const FLOOR_DRIFT = 1.002;
 const MENU_MAX = 8;
+// A paste over either limit folds into a token, as the terminal's does, and is
+// expanded back into the message on send.
+const PASTE_FOLD_NEWLINES = 2;
+const PASTE_FOLD_CHARS = 800;
 const NO_COMMANDS: SlashCommand[] = [];
 
 interface Dictation {
@@ -91,6 +95,14 @@ function teardown(d: Dictation): void {
 interface PickedFile {
   file: File;
   id: string;
+  /** `[Image #N]`, when pasted inline: the text refers to it by this. */
+  token?: string;
+}
+
+/** The terminal's paste token: `[Pasted text #1 +3 lines]`. */
+function pasteToken(n: number, text: string): string {
+  const newlines = text.split('\n').length - 1;
+  return `[Pasted text #${String(n)}${newlines > 0 ? ` +${String(newlines)} lines` : ''}]`;
 }
 
 /**
@@ -155,6 +167,10 @@ export function ChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const idRef = useRef(0);
+  // Numbering runs for the composer's life, as the terminal's does per session.
+  const pasteNoRef = useRef(0);
+  const imageNoRef = useRef(0);
+  const pastesRef = useRef(new Map<string, string>());
 
   // Dictation (PERS-23): one click starts capture, the next stops it. The text
   // writes itself into the composer as it is spoken and is never sent on its own.
@@ -349,8 +365,10 @@ export function ChatComposer({
     el.style.overflowY = next >= MAX_HEIGHT ? 'auto' : 'hidden';
   };
 
-  const addFiles = (incoming: File[]): void => {
+  // Returns the tokens of the files accepted, when they are pasted inline.
+  const addFiles = (incoming: File[], inline = false): string[] => {
     const next = [...files];
+    const tokens: string[] = [];
     // Accumulate every rejection reason (not just the last) so a mixed pick
     // surfaces all of them.
     const skipped: string[] = [];
@@ -367,6 +385,16 @@ export function ChatComposer({
         skipped.push(`${file.name}: unsupported type`);
         continue;
       }
+      if (inline && file.type.startsWith('image/')) {
+        const n = ++imageNoRef.current;
+        const token = `[Image #${String(n)}]`;
+        // Named after its token, so the agent's attachment list pairs them.
+        const ext = file.type.split('/')[1] ?? 'png';
+        const named = new File([file], `image-${String(n)}.${ext}`, { type: file.type });
+        next.push({ file: named, id: String(idRef.current++), token });
+        tokens.push(token);
+        continue;
+      }
       next.push({ file, id: String(idRef.current++) });
     }
     setFiles(next);
@@ -375,19 +403,48 @@ export function ChatComposer({
         ? `Skipped ${String(skipped.length)} file(s) — ${skipped.join('; ')}`
         : null
     );
+    return tokens;
   };
 
-  // Clipboard files (screenshots) join the paperclip's attachments. A clipboard
+  // Put text at the caret, replacing any selection, and keep the caret after it.
+  const insertAtCursor = (text: string): void => {
+    const el = textareaRef.current;
+    const start = el?.selectionStart ?? value.length;
+    const end = el?.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + text + value.slice(end);
+    setValue(next);
+    requestAnimationFrame(() => {
+      if (el === null) return;
+      grow(el);
+      el.setSelectionRange(start + text.length, start + text.length);
+    });
+  };
+
+  // As the terminal does: a pasted image joins the attachments and leaves an
+  // `[Image #N]` at the caret, so the text can say which picture it means; a
+  // long text paste folds to a `[Pasted text #N +K lines]` token. A clipboard
   // that also carries text (a spreadsheet range copies as text plus a picture)
   // pastes as text, which is what the copy meant.
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>): void => {
     const pasted = Array.from(e.clipboardData.files);
-    if (pasted.length === 0 || e.clipboardData.types.includes('text/plain')) return;
+    if (pasted.length > 0 && !e.clipboardData.types.includes('text/plain')) {
+      e.preventDefault();
+      const tokens = addFiles(pasted, true);
+      if (tokens.length > 0) insertAtCursor(tokens.join(' '));
+      return;
+    }
+    const text = e.clipboardData.getData('text/plain').replace(/\r\n/g, '\n');
+    const newlines = text.split('\n').length - 1;
+    if (newlines <= PASTE_FOLD_NEWLINES && text.length <= PASTE_FOLD_CHARS) return;
     e.preventDefault();
-    addFiles(pasted);
+    const token = pasteToken(++pasteNoRef.current, text);
+    pastesRef.current.set(token, text);
+    insertAtCursor(token);
   };
 
   const removeFile = (id: string): void => {
+    const gone = files.find(f => f.id === id);
+    if (gone?.token !== undefined) setValue(v => v.split(gone.token ?? '').join(''));
     setFiles(prev => prev.filter(f => f.id !== id));
     setFileError(null);
   };
@@ -395,7 +452,11 @@ export function ChatComposer({
   const submit = (): void => {
     const trimmed = value.trim();
     if (trimmed.length === 0 || disabled) return;
-    onSend(trimmed, files.length > 0 ? files.map(f => f.file) : undefined);
+    // Tokens deleted from the text are dropped with it, as in the terminal.
+    let expanded = trimmed;
+    for (const [token, text] of pastesRef.current) expanded = expanded.split(token).join(text);
+    pastesRef.current.clear();
+    onSend(expanded, files.length > 0 ? files.map(f => f.file) : undefined);
     setValue('');
     setFiles([]);
     setFileError(null);
@@ -453,7 +514,9 @@ export function ChatComposer({
                 className="flex items-center gap-[6px] rounded-[8px] border bg-[color:var(--surface-elevated)] py-[4px] pl-[9px] pr-[5px] text-[11.5px]"
                 style={{ borderColor: 'var(--border-bright)' }}
               >
-                <span className="max-w-[180px] truncate text-text-primary">{f.file.name}</span>
+                <span className="max-w-[180px] truncate text-text-primary">
+                  {f.token ?? f.file.name}
+                </span>
                 <span className="font-mono text-[10px] text-text-tertiary">
                   {formatBytes(f.file.size)}
                 </span>

@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import type { Components } from 'react-markdown';
 import { useConsoleTheme } from '../lib/theme';
 
@@ -241,11 +248,27 @@ function Graphic({
   );
 }
 
-/** Merge into any react-markdown `components` map. */
-export const GRAPHIC_COMPONENTS: Components = {
-  pre: ({ node, children, ...props }) => {
+/**
+ * A `pre` renderer that draws graphic fences and hands every other block to
+ * `plain`. A components map with its own `pre` must build it with this:
+ * spreading GRAPHIC_COMPONENTS and then redefining `pre` silently drops the
+ * graphics, which is how chat went without them.
+ */
+export function graphicPre(
+  plain: (props: ComponentProps<'pre'>) => ReactElement
+): NonNullable<Components['pre']> {
+  return ({ node, ...props }) => {
     const fence = fenceOf(node as HastNode | undefined);
-    const plain = <pre {...props}>{children}</pre>;
-    return fence ? <Graphic lang={fence.lang} source={fence.source} fallback={plain} /> : plain;
-  },
+    const fallback = plain(props);
+    return fence ? (
+      <Graphic lang={fence.lang} source={fence.source} fallback={fallback} />
+    ) : (
+      fallback
+    );
+  };
+}
+
+/** Merge into a react-markdown `components` map that has no `pre` of its own. */
+export const GRAPHIC_COMPONENTS: Components = {
+  pre: graphicPre(props => <pre {...props} />),
 };

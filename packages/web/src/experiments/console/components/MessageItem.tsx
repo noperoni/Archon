@@ -1,10 +1,11 @@
-import type { ReactElement } from 'react';
+import { memo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
-import { GRAPHIC_COMPONENTS } from './FencedGraphic';
+import { graphicPre } from './FencedGraphic';
 import { AgentAvatar } from './AgentAvatar';
+import { CopyButton, useCopy } from './CopyButton';
 import { formatClock } from '../lib/format';
 import type { Message } from '../primitives/message';
 
@@ -15,10 +16,52 @@ interface MessageItemProps {
    * (design v3 .log-agent-card): violet left accent + mono body, no avatar.
    */
   variant?: 'chat' | 'log';
+  /** A continuation of the same turn: no header, the avatar column kept as a gutter. */
+  compact?: boolean;
+}
+
+/** A fenced block with the copy button the terminal's selection stands in for. */
+function CodeBlock({ children }: { children?: ReactNode }): ReactElement {
+  const ref = useRef<HTMLPreElement>(null);
+  return (
+    <div className="group relative my-2">
+      <pre
+        ref={ref}
+        className="overflow-x-auto rounded border border-border bg-surface-inset p-2 pr-10 text-[12px] leading-relaxed"
+      >
+        {children}
+      </pre>
+      <CopyButton
+        getText={() => ref.current?.textContent ?? ''}
+        className="absolute top-1.5 right-1.5 opacity-60 group-hover:opacity-100"
+      />
+    </div>
+  );
+}
+
+/** Inline code copies on a plain click; a drag still selects as text. */
+function InlineCode({ children }: { children?: ReactNode }): ReactElement {
+  const [state, copy] = useCopy();
+  return (
+    <code
+      title={state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy refused' : 'Click to copy'}
+      onClick={e => {
+        if (window.getSelection()?.isCollapsed === false) return;
+        copy(e.currentTarget.textContent ?? '');
+      }}
+      className="cursor-copy rounded bg-surface-inset px-1 py-[1px] font-mono text-[12px] text-text-primary transition-colors"
+      style={
+        state === 'copied'
+          ? { background: 'color-mix(in oklch, var(--success), transparent 75%)' }
+          : undefined
+      }
+    >
+      {children}
+    </code>
+  );
 }
 
 const MD_COMPONENTS: Components = {
-  ...GRAPHIC_COMPONENTS,
   a: ({ href, children }) => (
     <a
       href={href}
@@ -30,15 +73,14 @@ const MD_COMPONENTS: Components = {
     </a>
   ),
   code: ({ className, children }) => {
-    const isBlock = className?.startsWith('language-');
+    // A fence without a language has no class, so a newline tells it apart.
+    const isBlock =
+      className?.startsWith('language-') === true ||
+      (typeof children === 'string' && children.includes('\n'));
     if (isBlock) {
       return <code className={className}>{children}</code>;
     }
-    return (
-      <code className="rounded bg-surface-inset px-1 py-[1px] font-mono text-[12px] text-text-primary">
-        {children}
-      </code>
-    );
+    return <InlineCode>{children}</InlineCode>;
   },
   h1: ({ children }) => (
     <h1 className="mt-2 mb-1.5 text-[14px] font-semibold text-text-primary">{children}</h1>
@@ -59,11 +101,7 @@ const MD_COMPONENTS: Components = {
     <ol className="my-1 ml-5 list-decimal space-y-0.5 marker:text-text-tertiary">{children}</ol>
   ),
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  pre: ({ children }) => (
-    <pre className="my-2 overflow-x-auto rounded border border-border bg-surface-inset p-2 text-[12px] leading-relaxed">
-      {children}
-    </pre>
-  ),
+  pre: graphicPre(({ children }) => <CodeBlock>{children}</CodeBlock>),
   blockquote: ({ children }) => (
     <blockquote className="my-1 border-l-2 border-border pl-2 text-text-secondary">
       {children}
@@ -121,7 +159,66 @@ const ERROR_BLOCK = (msg: string): ReactElement => (
  * border-utility colors otherwise (see `theme.css`, mirrored in
  * `StreamCard.tsx`).
  */
-export function MessageItem({ message, variant = 'chat' }: MessageItemProps): ReactElement {
+// Past this many lines a sent message folds, the way the terminal folds a paste.
+const FOLD_OVER_LINES = 14;
+const FOLD_SHOW_LINES = 8;
+const IMAGE_TOKEN = /(\[Image #\d+\])/;
+
+function UserText({ content }: { content: string }): ReactElement {
+  const [open, setOpen] = useState(false);
+  const lines = content.split('\n');
+  const folded = !open && lines.length > FOLD_OVER_LINES;
+  const shown = folded ? lines.slice(0, FOLD_SHOW_LINES).join('\n') : content;
+  return (
+    <>
+      <span className="whitespace-pre-wrap">
+        {shown.split(IMAGE_TOKEN).map((part, i) =>
+          IMAGE_TOKEN.test(part) ? (
+            <span
+              key={i}
+              className="rounded px-[5px] py-[1px] font-mono text-[12px]"
+              style={{ background: 'color-mix(in oklch, var(--brand-magenta), transparent 80%)' }}
+            >
+              {part}
+            </span>
+          ) : (
+            part
+          )
+        )}
+      </span>
+      {lines.length > FOLD_OVER_LINES ? (
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(v => !v);
+          }}
+          className="mt-1 block font-mono text-[11px] text-text-tertiary hover:text-text-primary"
+        >
+          {open ? '▴ fold' : `… +${String(lines.length - FOLD_SHOW_LINES)} lines`}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+const messageItem = memo(
+  MessageItemView,
+  (a, b) =>
+    a.variant === b.variant &&
+    a.compact === b.compact &&
+    a.message.id === b.message.id &&
+    a.message.role === b.message.role &&
+    a.message.content === b.message.content &&
+    a.message.timestamp === b.message.timestamp &&
+    a.message.error?.message === b.message.error?.message
+);
+export { messageItem as MessageItem };
+
+function MessageItemView({
+  message,
+  variant = 'chat',
+  compact = false,
+}: MessageItemProps): ReactElement {
   const kind = message.role;
   const content = message.content.trim();
   const clock = formatClock(message.timestamp);
@@ -157,7 +254,7 @@ export function MessageItem({ message, variant = 'chat' }: MessageItemProps): Re
             boxShadow: '0 0 0 4px color-mix(in oklch, var(--brand-magenta), transparent 95%)',
           }}
         >
-          {content}
+          <UserText content={content} />
         </div>
         {message.error !== null ? ERROR_BLOCK(message.error.message) : null}
       </div>
@@ -168,29 +265,29 @@ export function MessageItem({ message, variant = 'chat' }: MessageItemProps): Re
 
   return (
     <div className="flex flex-col">
-      <header className="mb-2 flex items-center gap-[9px] font-mono">
-        <span
-          className="rounded px-[7px] py-[2px] text-[10px] font-bold uppercase tracking-[0.14em]"
-          style={{
-            color: 'var(--brand-teal)',
-            background: 'color-mix(in oklch, var(--brand-teal), transparent 88%)',
-          }}
-        >
-          {label}
-        </span>
-        <time
-          dateTime={message.timestamp}
-          title={clock}
-          className="text-[11px] tracking-[0.3px] text-text-tertiary"
-        >
-          {clock}
-        </time>
-      </header>
+      {compact ? null : (
+        <header className="mb-2 flex items-center gap-[9px] font-mono">
+          <span
+            className="rounded px-[7px] py-[2px] text-[10px] font-bold uppercase tracking-[0.14em]"
+            style={{
+              color: 'var(--brand-teal)',
+              background: 'color-mix(in oklch, var(--brand-teal), transparent 88%)',
+            }}
+          >
+            {label}
+          </span>
+          <time
+            dateTime={message.timestamp}
+            title={clock}
+            className="text-[11px] tracking-[0.3px] text-text-tertiary"
+          >
+            {clock}
+          </time>
+        </header>
+      )}
       <div className="flex max-w-full items-start gap-[13px]">
         {log ? null : (
-          <div className="shrink-0">
-            <AgentAvatar size={30} />
-          </div>
+          <div className="w-[30px] shrink-0">{compact ? null : <AgentAvatar size={30} />}</div>
         )}
         <div className="min-w-0 flex-1">
           <div
