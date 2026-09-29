@@ -76,3 +76,17 @@ export async function getUsage(conversationId: string): Promise<ConversationUsag
   );
   return res.usage;
 }
+
+/** HK-47 fork: what filled the context by tool call, and what the danger gate stopped. */
+export interface ConversationBreakdown {
+  byTool: { tool: string; tokens: number; calls: number }[];
+  calls: { tool: string; label: string; tokens: number; estimated: boolean; ts: string }[];
+  gate: { ts: string; rule: string; command: string; outcome: string }[];
+}
+
+export async function getBreakdown(conversationId: string): Promise<ConversationBreakdown | null> {
+  const res = await requestJson<{ breakdown: ConversationBreakdown | null }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/breakdown`
+  );
+  return res.breakdown;
+}

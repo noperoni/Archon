@@ -110,6 +110,34 @@ export const conversationUsageResponseSchema = z
   })
   .openapi('ConversationUsageResponse');
 
+/** GET /api/conversations/:id/breakdown response (HK-47 fork). */
+export const conversationBreakdownResponseSchema = z
+  .object({
+    breakdown: z
+      .object({
+        byTool: z.array(z.object({ tool: z.string(), tokens: z.number(), calls: z.number() })),
+        calls: z.array(
+          z.object({
+            tool: z.string(),
+            label: z.string(),
+            tokens: z.number(),
+            estimated: z.boolean(),
+            ts: z.string(),
+          })
+        ),
+        gate: z.array(
+          z.object({
+            ts: z.string(),
+            rule: z.string(),
+            command: z.string(),
+            outcome: z.string(),
+          })
+        ),
+      })
+      .nullable(),
+  })
+  .openapi('ConversationBreakdownResponse');
+
 /** GET /api/conversations/:id/questions response. */
 export const pendingQuestionListSchema = z
   .array(

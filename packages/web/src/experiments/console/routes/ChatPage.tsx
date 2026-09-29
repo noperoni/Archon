@@ -594,7 +594,11 @@ export function ChatPage(): ReactElement {
         disabled={busy}
         onStop={onStop}
         commands={commands}
-        status={usage !== null && usage !== undefined ? <UsageMeter usage={usage} /> : null}
+        status={
+          usage !== null && usage !== undefined && activeConvId !== null ? (
+            <UsageMeter usage={usage} conversationId={activeConvId} />
+          ) : null
+        }
       />
     </section>
   );

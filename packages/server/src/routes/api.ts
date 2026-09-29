@@ -285,6 +285,7 @@ import { metricsQuerySchema, metricsResponseSchema } from './schemas/metrics.sch
 import { buildMetrics, defaultConfigDirs, defaultQueueDir, type Range } from '../metrics/metrics';
 import { TranscriptIndex } from '../metrics/transcript-index';
 import { conversationUsage } from '../metrics/conversation-usage';
+import { conversationBreakdown } from '../metrics/conversation-breakdown';
 import { archonSources } from '../metrics/archon-sources';
 import {
   workflowListResponseSchema,
@@ -326,6 +327,7 @@ import {
   questionAnswerBodySchema,
   pendingQuestionListSchema,
   conversationUsageResponseSchema,
+  conversationBreakdownResponseSchema,
 } from './schemas/conversation.schemas';
 import { answerQuestion, listQuestions } from '@archon/core/services/pending-questions';
 import {
@@ -847,6 +849,21 @@ const conversationUsageRoute = createRoute({
     200: {
       content: { 'application/json': { schema: conversationUsageResponseSchema } },
       description: 'Usage, or null before the first turn has written a transcript',
+    },
+    404: jsonError('Conversation not found'),
+  },
+});
+
+const conversationBreakdownRoute = createRoute({
+  method: 'get',
+  path: '/api/conversations/{id}/breakdown',
+  tags: ['Conversations'],
+  summary: 'What filled the context, by tool call, and what the danger gate stopped',
+  request: { params: conversationIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: conversationBreakdownResponseSchema } },
+      description: 'Breakdown, or null before the first turn has written a transcript',
     },
     404: jsonError('Conversation not found'),
   },
@@ -3133,29 +3150,54 @@ export function registerApiRoutes(
   });
 
   // GET /api/conversations/:id/usage - read from the session's transcript on disk
+  /** The transcript the next turn resumes, where the footer and its window read. */
+  async function activeTranscript(
+    conv: NonNullable<Awaited<ReturnType<typeof conversationDb.findConversationByPlatformId>>>
+  ): Promise<{ path: string; sessionId: string; configDir: string } | null> {
+    if (!conv.codebase_id) return null;
+    const history = await getSessionHistory(conv.id);
+    // The active session is the one the next turn resumes; history is newest first.
+    const session =
+      history.find(s => s.active && s.assistant_session_id) ??
+      history.find(s => s.assistant_session_id);
+    const codebase = await codebaseDb.getCodebase(conv.codebase_id);
+    if (!session?.assistant_session_id || !codebase) return null;
+    const configDir = await claudeConfigDirOf(conv.codebase_id);
+    const path = claudeTranscriptPath(
+      configDir,
+      conv.cwd ?? codebase.default_cwd,
+      session.assistant_session_id
+    );
+    if (!path || !existsSync(path)) return null;
+    return { path, sessionId: session.assistant_session_id, configDir };
+  }
+
   registerOpenApiRoute(conversationUsageRoute, async c => {
     const platformConversationId = c.req.param('id') ?? '';
     try {
       const conv = await conversationDb.findConversationByPlatformId(platformConversationId);
       if (!conv) return apiError(c, 404, 'Conversation not found');
-      if (!conv.codebase_id) return c.json({ usage: null });
-      const history = await getSessionHistory(conv.id);
-      // The active session is the one the next turn resumes; history is newest first.
-      const session =
-        history.find(s => s.active && s.assistant_session_id) ??
-        history.find(s => s.assistant_session_id);
-      const codebase = await codebaseDb.getCodebase(conv.codebase_id);
-      if (!session?.assistant_session_id || !codebase) return c.json({ usage: null });
-      const path = claudeTranscriptPath(
-        await claudeConfigDirOf(conv.codebase_id),
-        conv.cwd ?? codebase.default_cwd,
-        session.assistant_session_id
-      );
-      if (!path || !existsSync(path)) return c.json({ usage: null });
-      return c.json({ usage: conversationUsage(path, session.assistant_session_id) });
+      const t = await activeTranscript(conv);
+      return c.json({ usage: t === null ? null : conversationUsage(t.path, t.sessionId) });
     } catch (error) {
       getLog().error({ err: error, conversationId: platformConversationId }, 'usage_failed');
       return apiError(c, 500, 'Failed to read usage');
+    }
+  });
+
+  // GET /api/conversations/:id/breakdown - HK-47 fork: behind the usage meter
+  registerOpenApiRoute(conversationBreakdownRoute, async c => {
+    const platformConversationId = c.req.param('id') ?? '';
+    try {
+      const conv = await conversationDb.findConversationByPlatformId(platformConversationId);
+      if (!conv) return apiError(c, 404, 'Conversation not found');
+      const t = await activeTranscript(conv);
+      return c.json({
+        breakdown: t === null ? null : conversationBreakdown(t.path, t.sessionId, t.configDir),
+      });
+    } catch (error) {
+      getLog().error({ err: error, conversationId: platformConversationId }, 'breakdown_failed');
+      return apiError(c, 500, 'Failed to read breakdown');
     }
   });
 
