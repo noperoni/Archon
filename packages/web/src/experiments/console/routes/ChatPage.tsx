@@ -246,6 +246,34 @@ export function ChatPage(): ReactElement {
     };
   }, [busy, activeConvId, applyRunning]);
 
+  // HK-47 fork: Stop ends the turn and keeps the session, as Esc does in the
+  // terminal. The composer is disabled while busy, so Esc is caught at the
+  // window, and left alone when some other field (a question card) has focus.
+  const onStop = useCallback((): void => {
+    if (activeConvId === null) return;
+    skill.stopTurn(activeConvId).then(
+      () => {
+        invalidate(K.messages(activeConvId));
+      },
+      (e: unknown) => {
+        setError(e instanceof Error ? e.message : 'Stop failed.');
+      }
+    );
+  }, [activeConvId]);
+  useEffect(() => {
+    if (!busy) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      onStop();
+    };
+    window.addEventListener('keydown', onKey);
+    return (): void => {
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [busy, onStop]);
+
   // The inline tool trace, as the terminal draws it. On unless turned off.
   const [showTools, setShowTools] = useState(() => localStorage.getItem(TRACE_KEY) !== 'off');
   const toggleTrace = (): void => {
@@ -556,6 +584,7 @@ export function ChatPage(): ReactElement {
       <ChatComposer
         onSend={onSend}
         disabled={busy}
+        onStop={onStop}
         commands={commands}
         status={usage !== null && usage !== undefined ? <UsageMeter usage={usage} /> : null}
       />

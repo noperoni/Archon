@@ -437,6 +437,7 @@ import {
 } from './orchestrator-agent';
 import { buildAiProfile } from '@archon/workflows/model-validation';
 import { TerminalStatusWriteError } from '@archon/workflows/terminal-status-write';
+import { QueryAbortedError } from '@archon/providers/errors';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -4509,6 +4510,53 @@ describe('stale session ID clearing on error_during_execution', () => {
     await handleMessage(platform, 'conv-1', 'hello');
 
     expect(mockUpdateSession).toHaveBeenCalledWith('session-1', null);
+  });
+
+  // HK-47 fork (PERS-25): a user's Stop is not a stale session.
+  test('handleStreamMode: a user stop keeps the session the SDK announced', async () => {
+    mockSendQuery.mockImplementationOnce(async function* () {
+      yield { type: 'assistant', content: 'working on it' };
+      throw new QueryAbortedError('sid-live');
+    });
+    mockTransitionSession.mockResolvedValueOnce({ id: 'session-1', assistant_session_id: null });
+
+    const platform = makePlatform();
+    (platform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+    const stop = new AbortController();
+    stop.abort();
+    await handleMessage(platform, 'conv-1', 'hello', { abortSignal: stop.signal });
+
+    expect(mockUpdateSession).toHaveBeenCalledWith('session-1', 'sid-live');
+    expect(mockUpdateSession).not.toHaveBeenCalledWith('session-1', null);
+    const sent = (platform.sendMessage as ReturnType<typeof mock>).mock.calls.map(
+      (c: unknown[]) => c[1] as string
+    );
+    expect(sent).toContain('Interrupted by user.');
+    expect(sent.some((m: string) => m.toLowerCase().includes('error'))).toBe(false);
+  });
+
+  test('handleBatchMode: an interrupt-shaped result under a user stop keeps the session', async () => {
+    mockSendQuery.mockImplementationOnce(async function* () {
+      yield {
+        type: 'result',
+        isError: true,
+        errorSubtype: 'error_during_execution',
+        sessionId: 'sid-live',
+      };
+    });
+    mockTransitionSession.mockResolvedValueOnce({
+      id: 'session-1',
+      assistant_session_id: 'sid-live',
+    });
+
+    const platform = makePlatform();
+    (platform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('batch');
+    const stop = new AbortController();
+    stop.abort();
+    await handleMessage(platform, 'conv-1', 'hello', { abortSignal: stop.signal });
+
+    expect(mockUpdateSession).toHaveBeenCalledWith('session-1', 'sid-live');
+    expect(mockUpdateSession).not.toHaveBeenCalledWith('session-1', null);
   });
 
   test('does NOT surface error to user on stop_sequence success (#1425)', async () => {

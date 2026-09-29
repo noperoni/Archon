@@ -28,6 +28,8 @@ interface ChatComposerProps {
   commands?: SlashCommand[];
   /** Left of the key hints under the box: the context and cost readout. */
   status?: ReactNode;
+  /** HK-47 fork: offered in place of Send while a turn runs. */
+  onStop?: () => void;
 }
 
 const MAX_HEIGHT = 200;
@@ -123,6 +125,7 @@ export function ChatComposer({
   onSend,
   disabled,
   disabledReason,
+  onStop,
   commands = NO_COMMANDS,
   status,
 }: ChatComposerProps): ReactElement {
@@ -665,18 +668,32 @@ export function ChatComposer({
             className="min-h-0 flex-1 resize-none bg-transparent py-[7px] text-[14.5px] leading-[1.5] text-text-primary placeholder:text-text-tertiary focus:outline-none disabled:opacity-50"
             style={{ maxHeight: `${MAX_HEIGHT.toString()}px` }}
           />
-          <button
-            type="button"
-            onClick={submit}
-            disabled={disabled || value.trim().length === 0}
-            title="Send · Enter"
-            className="brand-bar flex h-[36px] shrink-0 items-center gap-[7px] rounded-[10px] px-[15px] text-[13px] font-bold text-white shadow-[0_6px_18px_-8px_color-mix(in_oklch,var(--brand-magenta),transparent_30%)] transition-[filter,transform] hover:brightness-110 active:translate-y-[1px] disabled:opacity-45 disabled:shadow-none disabled:hover:brightness-100"
-          >
-            Send
-            <span aria-hidden className="font-mono text-[10px] opacity-70">
-              ↵
-            </span>
-          </button>
+          {disabled && onStop !== undefined ? (
+            <button
+              type="button"
+              onClick={onStop}
+              title="Stop · Esc"
+              className="flex h-[36px] shrink-0 items-center gap-[7px] rounded-[10px] border border-error/50 px-[15px] text-[13px] font-bold text-error transition-colors hover:bg-error/[0.08] active:translate-y-[1px]"
+            >
+              Stop
+              <span aria-hidden className="font-mono text-[10px] opacity-70">
+                esc
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={disabled || value.trim().length === 0}
+              title="Send · Enter"
+              className="brand-bar flex h-[36px] shrink-0 items-center gap-[7px] rounded-[10px] px-[15px] text-[13px] font-bold text-white shadow-[0_6px_18px_-8px_color-mix(in_oklch,var(--brand-magenta),transparent_30%)] transition-[filter,transform] hover:brightness-110 active:translate-y-[1px] disabled:opacity-45 disabled:shadow-none disabled:hover:brightness-100"
+            >
+              Send
+              <span aria-hidden className="font-mono text-[10px] opacity-70">
+                ↵
+              </span>
+            </button>
+          )}
         </div>
         <div className="mt-[9px] flex items-center justify-between px-[2px] font-mono text-[11px] text-text-tertiary">
           <span>{status}</span>

@@ -35,9 +35,11 @@ import {
   type HookCallback,
   type HookCallbackMatcher,
   type SDKAssistantMessageError,
+  type SDKMessage,
   type SDKResultMessage,
   type ModelUsage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { QueryAbortedError } from '../errors';
 import type {
   IAgentProvider,
   SendQueryOptions,
@@ -1608,6 +1610,18 @@ export class ClaudeProvider implements IAgentProvider {
     if (requestOptions?.abortSignal) {
       requestOptions.abortSignal.addEventListener('abort', onAbort, { once: true });
     }
+    // HK-47 fork: the id the SDK announces on its first message, so a caller's
+    // stop can still name the session: an abort kills the subprocess before any
+    // result, and without this a stopped first turn is unresumable.
+    let announcedSessionId: string | undefined;
+    const noteSessionId = async function* (
+      gen: AsyncGenerator<SDKMessage>
+    ): AsyncGenerator<SDKMessage> {
+      for await (const msg of gen) {
+        if ('session_id' in msg && msg.session_id) announcedSessionId = msg.session_id;
+        yield msg;
+      }
+    };
 
     for (let attempt = 0; attempt <= MAX_SUBPROCESS_RETRIES; attempt++) {
       if (requestOptions?.abortSignal?.aborted) {
@@ -1669,7 +1683,12 @@ export class ClaudeProvider implements IAgentProvider {
           options.env as Record<string, string>,
           options.model
         );
-        const events = withFirstMessageTimeout(rawEvents, controller, timeoutMs, diagnostics);
+        const events = withFirstMessageTimeout(
+          noteSessionId(rawEvents),
+          controller,
+          timeoutMs,
+          diagnostics
+        );
 
         // 5. Stream normalized events
         // Claude resumes-or-errors: an invalid resume id throws (and is
@@ -1700,6 +1719,9 @@ export class ClaudeProvider implements IAgentProvider {
           'query_error'
         );
 
+        if (errorClass === 'aborted' && requestOptions?.abortSignal?.aborted) {
+          throw new QueryAbortedError(announcedSessionId ?? resumeSessionId);
+        }
         if (!shouldRetry || attempt >= MAX_SUBPROCESS_RETRIES) {
           throw enrichedError;
         }

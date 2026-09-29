@@ -16,6 +16,15 @@ export async function isRunning(conversationId: string): Promise<boolean> {
   return res.running;
 }
 
+/** HK-47 fork: end the running turn; the session is kept for the next message. */
+export async function stopTurn(conversationId: string): Promise<boolean> {
+  const res = await requestJson<{ stopped: boolean }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/stop`,
+    { method: 'POST' }
+  );
+  return res.stopped;
+}
+
 /** How often an open chat or live run page re-reads its pending questions. */
 export const QUESTION_POLL_MS = 5000;
 

@@ -16,7 +16,7 @@ import type {
   Codebase,
   AttachedFile,
 } from '../types';
-import type { SendQueryOptions, TokenUsage } from '@archon/providers/types';
+import type { MessageChunk, SendQueryOptions, TokenUsage } from '@archon/providers/types';
 import { ConversationNotFoundError, isWebAdapter } from '../types';
 import * as db from '../db/conversations';
 import * as codebaseDb from '../db/codebases';
@@ -27,6 +27,7 @@ import { classifyAndFormatError } from '../utils/error-formatter';
 import { toError } from '../utils/error';
 import { safeDeactivateSession } from '../state/session-transitions';
 import { getAgentProvider, getProviderCapabilities } from '@archon/providers';
+import { QueryAbortedError } from '@archon/providers/errors';
 import { buildManageRunTool } from './manage-run-tool';
 import { getArchonWorkspacesPath, ensureArchonWorkspacesPath } from '@archon/paths';
 import { resolveWorkflowSourceRoot } from '../utils/workflow-source-root';
@@ -2505,6 +2506,7 @@ export async function handleMessage(
       protectedEnvKeys: protectedEnvKeys.length > 0 ? protectedEnvKeys : undefined,
       model: chatRequest.model,
       systemPrompt,
+      abortSignal: context?.abortSignal,
     };
     if (chatRequest.preset) {
       applyPresetToRequestOptions(providerKey, chatRequest.preset, requestOptions);
@@ -2703,6 +2705,41 @@ export async function handleMessage(
   }
 }
 
+// HK-47 fork: the user's Stop. The transcript is on disk whether it landed as
+// a kill (QueryAbortedError) or an interrupt-shaped error_during_execution
+// result, so a stopped turn keeps its session instead of clearing it as stale.
+interface UserStop {
+  stopped: boolean;
+  sessionId?: string;
+}
+
+/** Ends the stream quietly on a user stop, noting the session it belonged to. */
+async function* endOnUserStop(
+  chunks: AsyncGenerator<MessageChunk>,
+  stop: UserStop
+): AsyncGenerator<MessageChunk> {
+  try {
+    yield* chunks;
+  } catch (error) {
+    if (!(error instanceof QueryAbortedError)) throw error;
+    stop.stopped = true;
+    stop.sessionId = error.sessionId;
+  }
+}
+
+async function endStoppedTurn(
+  platform: IPlatformAdapter,
+  conversationId: string,
+  sessionRowId: string,
+  assistantSessionId: string | undefined
+): Promise<void> {
+  if (assistantSessionId) {
+    await tryPersistSessionId(sessionRowId, assistantSessionId);
+  }
+  getLog().info({ conversationId, assistantSessionId }, 'orchestrator.turn_stopped');
+  await platform.sendMessage(conversationId, 'Interrupted by user.');
+}
+
 // ─── Streaming Mode ─────────────────────────────────────────────────────────
 
 /**
@@ -2732,11 +2769,10 @@ async function handleStreamMode(
   let commandFullyParsed = false;
   let lastResult: { cost?: number; tokens?: TokenUsage; stopReason?: string } | undefined;
 
-  for await (const msg of aiClient.sendQuery(
-    fullPrompt,
-    cwd,
-    session.assistant_session_id ?? undefined,
-    requestOptions
+  const stop: UserStop = { stopped: false };
+  for await (const msg of endOnUserStop(
+    aiClient.sendQuery(fullPrompt, cwd, session.assistant_session_id ?? undefined, requestOptions),
+    stop
   )) {
     if (msg.type === 'assistant' && msg.content) {
       // Accumulate only while the command is not yet fully captured; post-command
@@ -2788,6 +2824,10 @@ async function handleStreamMode(
       }
     } else if (msg.type === 'result') {
       if (msg.isError && msg.errorSubtype === 'error_during_execution') {
+        if (requestOptions?.abortSignal?.aborted) {
+          await endStoppedTurn(platform, conversationId, session.id, msg.sessionId ?? newSessionId);
+          return;
+        }
         getLog().warn(
           {
             conversationId,
@@ -2848,6 +2888,11 @@ async function handleStreamMode(
         stopReason: msg.stopReason,
       };
     }
+  }
+
+  if (stop.stopped) {
+    await endStoppedTurn(platform, conversationId, session.id, stop.sessionId ?? newSessionId);
+    return;
   }
 
   if (newSessionId) {
@@ -2965,11 +3010,10 @@ async function handleBatchMode(
   let commandFullyParsed = false;
   let lastResult: { cost?: number; tokens?: TokenUsage; stopReason?: string } | undefined;
 
-  for await (const msg of aiClient.sendQuery(
-    fullPrompt,
-    cwd,
-    session.assistant_session_id ?? undefined,
-    requestOptions
+  const stop: UserStop = { stopped: false };
+  for await (const msg of endOnUserStop(
+    aiClient.sendQuery(fullPrompt, cwd, session.assistant_session_id ?? undefined, requestOptions),
+    stop
   )) {
     if (msg.type === 'assistant' && msg.content) {
       // Always record in allChunks for debug logging; accumulate assistantMessages
@@ -3022,6 +3066,10 @@ async function handleBatchMode(
       }
     } else if (msg.type === 'result') {
       if (msg.isError && msg.errorSubtype === 'error_during_execution') {
+        if (requestOptions?.abortSignal?.aborted) {
+          await endStoppedTurn(platform, conversationId, session.id, msg.sessionId ?? newSessionId);
+          return;
+        }
         getLog().warn(
           {
             conversationId,
@@ -3086,6 +3134,11 @@ async function handleBatchMode(
       allChunks.shift();
       totalChunksTruncated = true;
     }
+  }
+
+  if (stop.stopped) {
+    await endStoppedTurn(platform, conversationId, session.id, stop.sessionId ?? newSessionId);
+    return;
   }
 
   if (newSessionId) {

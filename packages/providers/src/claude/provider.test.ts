@@ -26,6 +26,7 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
 import { ClaudeProvider, classifySubprocessError, shouldPassNoEnvFile } from './provider';
 import * as claudeModule from './provider';
 import * as binaryResolver from './binary-resolver';
+import { QueryAbortedError } from '../errors';
 
 describe('shouldPassNoEnvFile', () => {
   test('returns false when cliPath is undefined (dev mode — SDK 0.2.x resolves a native binary)', () => {
@@ -2241,6 +2242,31 @@ describe('sendQuery decomposition behaviors', () => {
     await expect(consumeGenerator()).rejects.toThrow('Query aborted');
     // Single abort listener registered (not per-retry)
     expect(callCount).toBe(1);
+  }, 5_000);
+
+  // HK-47 fork (PERS-25): a stop names the session so the caller can resume it.
+  test('a caller abort mid-stream throws QueryAbortedError carrying the announced session', async () => {
+    const abortController = new AbortController();
+    mockQuery.mockImplementation(async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'sid-announced' };
+      abortController.abort();
+      throw new Error('Claude Code process aborted by user');
+    });
+
+    const consumeGenerator = async (): Promise<void> => {
+      for await (const _ of client.sendQuery('test', '/workspace', undefined, {
+        abortSignal: abortController.signal,
+      })) {
+        // consume
+      }
+    };
+
+    const err = await consumeGenerator().then(
+      () => undefined,
+      (e: unknown) => e
+    );
+    expect(err).toBeInstanceOf(QueryAbortedError);
+    expect((err as QueryAbortedError).sessionId).toBe('sid-announced');
   }, 5_000);
 
   test('enriched error (with stderr) is thrown at retry exhaustion, not raw error', async () => {

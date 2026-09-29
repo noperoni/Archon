@@ -23,3 +23,15 @@ export class InvalidProviderRunConfigError extends Error {
     this.name = 'InvalidProviderRunConfigError';
   }
 }
+
+/**
+ * HK-47 fork: the caller's abortSignal ended the query. Carries the session id
+ * the SDK announced before the stop, so a caller can keep resuming it: the
+ * transcript is on disk even though no result message ever arrived.
+ */
+export class QueryAbortedError extends Error {
+  constructor(public readonly sessionId?: string) {
+    super('Query aborted');
+    this.name = 'QueryAbortedError';
+  }
+}

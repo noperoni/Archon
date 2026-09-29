@@ -798,6 +798,20 @@ const conversationRunningRoute = createRoute({
   },
 });
 
+const stopConversationRoute = createRoute({
+  method: 'post',
+  path: '/api/conversations/{id}/stop',
+  tags: ['Conversations'],
+  summary: 'Stop the running turn, keeping the session for the next message',
+  request: { params: conversationIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: z.object({ stopped: z.boolean() }) } },
+      description: 'False when no turn was running to stop',
+    },
+  },
+});
+
 const answerQuestionRoute = createRoute({
   method: 'post',
   path: '/api/conversations/{id}/questions/{toolUseId}/answer',
@@ -2594,6 +2608,9 @@ export function registerApiRoutes(
     return { ok: true, savedFiles, uploadDir };
   }
 
+  // HK-47 fork: one controller per running turn, so the console's Stop can end it.
+  const turnAborts = new Map<string, AbortController>();
+
   async function dispatchToOrchestrator(
     conversationId: string,
     message: string,
@@ -2604,10 +2621,13 @@ export function registerApiRoutes(
       // Emit lock:true at handler start so the UI knows processing has begun.
       // Fire-and-forget — if no SSE stream is connected yet, the event is buffered.
       webAdapter.emitLockEvent(conversationId, true);
+      const turnAbort = new AbortController();
+      turnAborts.set(conversationId, turnAbort);
       try {
         await handleMessage(webAdapter, conversationId, message, {
           isolationHints: { workflowType: 'thread', workflowId: conversationId },
           ...extraContext,
+          abortSignal: turnAbort.signal,
         });
       } catch (error) {
         getLog().error({ err: error, conversationId }, 'handle_message_failed');
@@ -2625,6 +2645,7 @@ export function registerApiRoutes(
           getLog().error({ err: sseError, conversationId }, 'sse_error_emit_failed');
         }
       } finally {
+        turnAborts.delete(conversationId);
         await webAdapter.emitLockEvent(conversationId, false);
         // Clean up uploaded files AFTER handleMessage completes so the AI subprocess
         // has had a chance to read them. Doing this in the HTTP handler's finally block
@@ -3082,6 +3103,13 @@ export function registerApiRoutes(
   registerOpenApiRoute(conversationRunningRoute, c =>
     c.json({ running: lockManager.isBusy(c.req.param('id') ?? '') })
   );
+
+  // POST /api/conversations/:id/stop - HK-47 fork: end the running turn
+  registerOpenApiRoute(stopConversationRoute, c => {
+    const turnAbort = turnAborts.get(c.req.param('id') ?? '');
+    turnAbort?.abort();
+    return c.json({ stopped: turnAbort !== undefined });
+  });
 
   // POST /api/conversations/:id/questions/:toolUseId/answer - Settle a parked AskUserQuestion
   registerOpenApiRoute(answerQuestionRoute, async c => {

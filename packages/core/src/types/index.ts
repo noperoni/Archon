@@ -78,6 +78,11 @@ export interface HandleMessageContext {
    */
   readonly workflowAdoptRunId?: string;
   readonly workflowSupersedesRunId?: string;
+  /**
+   * HK-47 fork: the console's Stop. Aborting ends the turn's AI query; the
+   * session is kept so the next message resumes with its memory.
+   */
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface CommandResult {
