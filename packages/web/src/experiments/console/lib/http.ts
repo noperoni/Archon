@@ -14,7 +14,7 @@ const API_PORT = (import.meta.env.VITE_API_PORT as string | undefined) ?? '3090'
 // /api straight to the server, so same-origin is correct and the raw API port is
 // not reachable from the browser at all.
 export const SSE_BASE_URL =
-  import.meta.env.DEV && window.location.port === '55173'
+  import.meta.env.DEV && window.location.port === (import.meta.env.VITE_WEB_PORT as string)
     ? `http://${window.location.hostname}:${API_PORT}`
     : '';
 

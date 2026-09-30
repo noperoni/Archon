@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
   // Load env from repo root so PORT from .env is available
   const env = loadEnv(mode, path.resolve(__dirname, '../..'), '');
   const apiPort = env.PORT ?? '3090';
+  // HK-47 fork: the dev console runs beside the live one, so its port is set per
+  // instance (WEB_PORT) and handed to the client, which bypasses this server's
+  // SSE-buffering proxy only when the page really is served from it.
+  const webPort = Number(env.WEB_PORT ?? '55173');
 
   // Read version from root package.json
   const rootPkgPath = path.resolve(__dirname, '../../package.json');
@@ -30,6 +34,7 @@ export default defineConfig(({ mode }) => {
     define: {
       // Inject API port so browser code can access it via import.meta.env.VITE_API_PORT
       'import.meta.env.VITE_API_PORT': JSON.stringify(apiPort),
+      'import.meta.env.VITE_WEB_PORT': JSON.stringify(String(webPort)),
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
       'import.meta.env.VITE_GIT_COMMIT': JSON.stringify(gitCommit),
     },
@@ -45,7 +50,7 @@ export default defineConfig(({ mode }) => {
       ],
     },
     server: {
-      port: 55173,
+      port: webPort,
       strictPort: true,
       // HK-47 fork: reachable through a reverse proxy, whose hostnames come from
       // ARCHON_ALLOWED_HOSTS in the untracked repo-root .env (comma-separated).
