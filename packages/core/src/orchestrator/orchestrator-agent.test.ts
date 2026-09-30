@@ -434,6 +434,7 @@ import {
   resolveChatModelRequest,
   resolveTitleRequest,
   continueResolvedGateRun,
+  RESTART_STOP_REASON,
 } from './orchestrator-agent';
 import { buildAiProfile } from '@archon/workflows/model-validation';
 import { TerminalStatusWriteError } from '@archon/workflows/terminal-status-write';
@@ -4533,6 +4534,28 @@ describe('stale session ID clearing on error_during_execution', () => {
     );
     expect(sent).toContain('Interrupted by user.');
     expect(sent.some((m: string) => m.toLowerCase().includes('error'))).toBe(false);
+  });
+
+  test('handleStreamMode: a restart stop keeps the session and says the console restarted', async () => {
+    mockSendQuery.mockImplementationOnce(async function* () {
+      yield { type: 'assistant', content: 'working on it' };
+      throw new QueryAbortedError('sid-live');
+    });
+    mockTransitionSession.mockResolvedValueOnce({ id: 'session-1', assistant_session_id: null });
+
+    const platform = makePlatform();
+    (platform.getStreamingMode as ReturnType<typeof mock>).mockReturnValue('stream');
+    const stop = new AbortController();
+    stop.abort(RESTART_STOP_REASON);
+    await handleMessage(platform, 'conv-1', 'hello', { abortSignal: stop.signal });
+
+    expect(mockUpdateSession).toHaveBeenCalledWith('session-1', 'sid-live');
+    expect(mockUpdateSession).not.toHaveBeenCalledWith('session-1', null);
+    const sent = (platform.sendMessage as ReturnType<typeof mock>).mock.calls.map(
+      (c: unknown[]) => c[1] as string
+    );
+    expect(sent.some((m: string) => m.includes('the console restarted'))).toBe(true);
+    expect(sent).not.toContain('Interrupted by user.');
   });
 
   test('handleBatchMode: an interrupt-shaped result under a user stop keeps the session', async () => {

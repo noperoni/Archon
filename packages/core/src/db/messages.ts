@@ -50,16 +50,21 @@ export async function addMessage(
  * returned, then reverses to preserve chronological (oldest-first) order.
  * `id DESC` breaks ties between rows sharing a created_at (SQLite stores
  * 1-second granularity) so the LIMIT window is stable across refetches.
+ * HK-47 fork: on SQLite the tie goes to `rowid` instead, because `id` is random
+ * hex: a turn's rows flushed within one second rendered in a shuffled order
+ * (a tool row after the "Interrupted" row that ended it). rowid is insertion
+ * order and just as stable.
  * conversationId is the database UUID (not platform_conversation_id).
  */
 export async function listMessages(
   conversationId: string,
   limit = 200
 ): Promise<readonly MessageRow[]> {
+  const tieBreak = getDatabaseType() === 'postgresql' ? 'id' : 'rowid';
   const result = await pool.query<MessageRow>(
     `SELECT * FROM remote_agent_messages
      WHERE conversation_id = $1
-     ORDER BY created_at DESC, id DESC
+     ORDER BY created_at DESC, ${tieBreak} DESC
      LIMIT $2`,
     [conversationId, limit]
   );

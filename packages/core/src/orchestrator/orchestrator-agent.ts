@@ -2727,17 +2727,26 @@ async function* endOnUserStop(
   }
 }
 
+/** Why a turn was stopped: the abort reason the server gave, when it gave one. */
+export const RESTART_STOP_REASON = 'restart';
+
 async function endStoppedTurn(
   platform: IPlatformAdapter,
   conversationId: string,
   sessionRowId: string,
-  assistantSessionId: string | undefined
+  assistantSessionId: string | undefined,
+  reason: unknown
 ): Promise<void> {
   if (assistantSessionId) {
     await tryPersistSessionId(sessionRowId, assistantSessionId);
   }
-  getLog().info({ conversationId, assistantSessionId }, 'orchestrator.turn_stopped');
-  await platform.sendMessage(conversationId, 'Interrupted by user.');
+  getLog().info({ conversationId, assistantSessionId, reason }, 'orchestrator.turn_stopped');
+  await platform.sendMessage(
+    conversationId,
+    reason === RESTART_STOP_REASON
+      ? 'Interrupted: the console restarted. The session is kept; send a message to carry on.'
+      : 'Interrupted by user.'
+  );
 }
 
 // ─── Streaming Mode ─────────────────────────────────────────────────────────
@@ -2825,7 +2834,13 @@ async function handleStreamMode(
     } else if (msg.type === 'result') {
       if (msg.isError && msg.errorSubtype === 'error_during_execution') {
         if (requestOptions?.abortSignal?.aborted) {
-          await endStoppedTurn(platform, conversationId, session.id, msg.sessionId ?? newSessionId);
+          await endStoppedTurn(
+            platform,
+            conversationId,
+            session.id,
+            msg.sessionId ?? newSessionId,
+            requestOptions?.abortSignal?.reason
+          );
           return;
         }
         getLog().warn(
@@ -2891,7 +2906,13 @@ async function handleStreamMode(
   }
 
   if (stop.stopped) {
-    await endStoppedTurn(platform, conversationId, session.id, stop.sessionId ?? newSessionId);
+    await endStoppedTurn(
+      platform,
+      conversationId,
+      session.id,
+      stop.sessionId ?? newSessionId,
+      requestOptions?.abortSignal?.reason
+    );
     return;
   }
 
@@ -3067,7 +3088,13 @@ async function handleBatchMode(
     } else if (msg.type === 'result') {
       if (msg.isError && msg.errorSubtype === 'error_during_execution') {
         if (requestOptions?.abortSignal?.aborted) {
-          await endStoppedTurn(platform, conversationId, session.id, msg.sessionId ?? newSessionId);
+          await endStoppedTurn(
+            platform,
+            conversationId,
+            session.id,
+            msg.sessionId ?? newSessionId,
+            requestOptions?.abortSignal?.reason
+          );
           return;
         }
         getLog().warn(
@@ -3137,7 +3164,13 @@ async function handleBatchMode(
   }
 
   if (stop.stopped) {
-    await endStoppedTurn(platform, conversationId, session.id, stop.sessionId ?? newSessionId);
+    await endStoppedTurn(
+      platform,
+      conversationId,
+      session.id,
+      stop.sessionId ?? newSessionId,
+      requestOptions?.abortSignal?.reason
+    );
     return;
   }
 

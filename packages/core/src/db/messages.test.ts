@@ -135,6 +135,19 @@ describe('messages', () => {
       );
     });
 
+    // HK-47 fork: SQLite ties go to insertion order, not the random hex id.
+    test('breaks same-second ties by rowid on SQLite', async () => {
+      mockGetDatabaseType.mockReturnValueOnce('sqlite');
+      mockQuery.mockResolvedValueOnce(createQueryResult([]));
+
+      await listMessages('conv-456');
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('ORDER BY created_at DESC, rowid DESC'),
+        ['conv-456', 200]
+      );
+    });
+
     test('returns empty array for no results', async () => {
       mockQuery.mockResolvedValueOnce(createQueryResult([]));
 

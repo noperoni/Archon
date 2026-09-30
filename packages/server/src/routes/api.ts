@@ -59,6 +59,7 @@ import {
   setUserTiers,
   setUserAliases,
   setUserDefault,
+  RESTART_STOP_REASON,
 } from '@archon/core';
 import type { UserTiersPatch, UserAliasesPatch, AliasesPatch } from '@archon/core';
 import { parseWorkflowRunConfig } from '@archon/core/config';
@@ -1842,7 +1843,7 @@ export function registerApiRoutes(
   webAdapter: WebAdapter,
   lockManager: ConversationLockManager,
   activePlatforms?: readonly string[]
-): void {
+): { stopAllTurns: () => number } {
   function apiError(
     c: Context,
     status: 400 | 401 | 404 | 422 | 500 | 503,
@@ -5831,4 +5832,13 @@ export function registerApiRoutes(
     const result = await checkForUpdate(appVersion);
     return c.json(result ?? noUpdate);
   });
+
+  // HK-47 fork: a restart ends every running turn the way Stop does, keeping
+  // its session and saying why, instead of severing it mid-stream.
+  return {
+    stopAllTurns: (): number => {
+      for (const turnAbort of turnAborts.values()) turnAbort.abort(RESTART_STOP_REASON);
+      return turnAborts.size;
+    },
+  };
 }

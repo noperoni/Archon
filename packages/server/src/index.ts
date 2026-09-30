@@ -735,7 +735,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
   }
 
   // Register Web UI API routes
-  registerApiRoutes(app, webAdapter, lockManager, activePlatforms);
+  const apiRoutes = registerApiRoutes(app, webAdapter, lockManager, activePlatforms);
 
   // GitHub webhook endpoint
   if (github) {
@@ -1007,15 +1007,33 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
   });
 
   // Graceful shutdown
+  const SHUTDOWN_TURN_GRACE_MS = 10_000;
   const shutdown = (): void => {
     getLog().info('server_shutting_down');
     stopCleanupScheduler();
     stopWorkflowContinuationScheduler();
     persistence.stopPeriodicFlush();
 
+    // HK-47 fork: end running turns the way Stop does (child killed, session
+    // kept, "Interrupted: the console restarted" posted) and let their handlers
+    // finish writing before the flush. Severed instead, each lost its reply and
+    // any parked question, and read as done.
+    // ponytail: a crash skips this; systemd's KillMode=mixed still reaps the
+    // children, but the cut turn carries no interrupted row.
+    const stopped = apiRoutes.stopAllTurns();
+    if (stopped > 0) getLog().info({ stopped }, 'shutdown_turns_stopped');
+    const idle = new Promise<void>(resolve => {
+      const deadline = Date.now() + SHUTDOWN_TURN_GRACE_MS;
+      const poll = (): void => {
+        if (lockManager.getStats().active === 0 || Date.now() >= deadline) resolve();
+        else setTimeout(poll, 100);
+      };
+      poll();
+    });
+
     // Flush all buffered messages before stopping adapters
-    persistence
-      .flushAll()
+    idle
+      .then(() => persistence.flushAll())
       .catch((e: unknown) => {
         getLog().error({ err: e }, 'shutdown_flush_failed');
       })
