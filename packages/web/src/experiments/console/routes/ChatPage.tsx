@@ -15,6 +15,7 @@ import { K } from '../store/keys';
 import * as skill from '../skills';
 import type { Project } from '../primitives/project';
 import type { Message } from '../primitives/message';
+import { ensureUtc } from '../lib/format';
 import { QUESTION_POLL_MS, type ConversationUsage, type PendingQuestion } from '../skills/messages';
 import type { ConversationSummary } from '../primitives/conversation';
 import type { ClaudeSession, SlashCommand } from '../skills/conversations';
@@ -29,6 +30,9 @@ const ACTIVE_POLL_MS = 3000;
 // Distance from the bottom (px) within which we treat the scroll as "at bottom"
 // — drives both auto-scroll stickiness and the jump-to-bottom button's visibility.
 const NEAR_BOTTOM_PX = 120;
+// A stored row's time is truncated to the second; allow that and a little skew.
+const ECHO_SLACK_MS = 2000;
+
 // The trace toggle outlives a reload; it defaults on, as the terminal shows it.
 const TRACE_KEY = 'hk47.chat.trace';
 
@@ -284,12 +288,11 @@ export function ChatPage(): ReactElement {
   };
 
   // The sent message shows at once, as the terminal echoes it, until the
-  // refetched history carries it. `after` is how many rows existed at send.
+  // refetched history carries it.
   const [echo, setEcho] = useState<{
     text: string;
     display: string | null;
     at: string;
-    after: number;
   } | null>(null);
 
   const onSend = (text: string, files?: File[], display?: string): void => {
@@ -302,7 +305,6 @@ export function ChatPage(): ReactElement {
       text,
       display: display ?? null,
       at: new Date().toISOString(),
-      after: activeConvId === null ? 0 : (messages ?? []).length,
     });
     scrollToBottom();
     void (async (): Promise<void> => {
@@ -406,9 +408,18 @@ export function ChatPage(): ReactElement {
   }
 
   const fetched = messages ?? [];
+  // Any user row stored since the send is this message. Matching its text kept
+  // the echo beside the stored row whenever the server's text differed by a byte
+  // (pasted text, attachments), and counting rows past the send point failed once the
+  // history is a full 200-row window that no longer grows: either way the
+  // message showed twice. Stored times are whole seconds, hence the slack.
   const echoed =
     echo !== null &&
-    fetched.slice(echo.after).some(m => m.role === 'user' && m.content.trim() === echo.text);
+    fetched.some(
+      m =>
+        m.role === 'user' &&
+        Date.parse(ensureUtc(m.timestamp)) >= Date.parse(echo.at) - ECHO_SLACK_MS
+    );
   const messageList: Message[] =
     echo === null || echoed
       ? fetched
