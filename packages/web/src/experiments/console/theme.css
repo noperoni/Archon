@@ -23,6 +23,29 @@
 /* Geist & Geist Mono — loaded only when a console route mounts. */
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap');
 
+/* The window, whatever the UI zoom (lib/ui-zoom.ts): CSS zoom on <html>
+ * multiplies this element's own size back up to exactly the viewport. */
+.console-viewport {
+  width: calc(100vw / var(--ui-zoom, 1));
+  height: calc(100vh / var(--ui-zoom, 1));
+}
+
+.ui-zoom-toast {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: oklch(0.205 0.01 50);
+  border: 1px solid oklch(0.355 0.017 50);
+  color: oklch(0.9 0.01 60);
+  font: 12px ui-monospace, monospace;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
 .console-root {
   /* Surfaces — warm charcoal (hue 50) */
   --surface: oklch(0.175 0.008 50);

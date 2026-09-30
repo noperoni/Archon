@@ -15,6 +15,7 @@ import { SettingsPage } from './routes/SettingsPage';
 import { invalidate } from './store/cache';
 import { K } from './store/keys';
 import { useKeymap, type Binding } from './lib/keymap';
+import { useScreenZoom } from './lib/ui-zoom';
 import { SHORTCUTS } from './lib/shortcuts';
 import { applyConsoleTheme } from './lib/theme';
 import { useTranscriptSSE } from './lib/sse';
@@ -64,13 +65,14 @@ export function ConsoleApp(): ReactElement {
     ],
     [navigate]
   );
+  useScreenZoom();
   useKeymap({
     bindings: globalBindings,
     enabled: !addOpen && !paletteOpen && !helpOpen,
   });
 
   return (
-    <div className="console-root flex h-screen w-screen flex-col bg-surface text-text-primary">
+    <div className="console-root console-viewport flex flex-col bg-surface text-text-primary">
       <div className="flex min-h-0 flex-1">
         <ProjectRail
           onAddProject={() => {
