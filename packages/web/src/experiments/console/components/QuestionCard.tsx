@@ -125,7 +125,9 @@ export function QuestionCard({
           const chosen = picked[q.question] ?? [];
           const preview = q.options.find(o => chosen.includes(o.label))?.preview;
           return (
-            <fieldset key={q.question} className="flex flex-col gap-2" disabled={sending}>
+            // min-w-0: a fieldset's default min-inline-size is min-content, so one
+            // unbreakable answer would widen the card past the stream column.
+            <fieldset key={q.question} className="flex min-w-0 flex-col gap-2" disabled={sending}>
               <legend className="mb-1.5 flex items-baseline gap-2 text-[13px] text-text-primary">
                 {q.header !== undefined ? (
                   <span className="rounded border border-border px-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-text-tertiary">
@@ -156,8 +158,10 @@ export function QuestionCard({
                   </span>
                 </label>
               ))}
-              {/* A textarea sized to its content: a single-line input ran long
-                  answers off to the right instead of wrapping. */}
+              {/* A textarea whose height follows its content: a single-line input
+                  ran long answers off to the right. w-full pins the width, since
+                  field-sizing would otherwise grow it too, and wrap-anywhere
+                  breaks a string with no spaces in it. */}
               <textarea
                 rows={1}
                 placeholder="Other"
@@ -169,7 +173,7 @@ export function QuestionCard({
                     setPicked(prev => ({ ...prev, [q.question]: [] }));
                   }
                 }}
-                className="field-sizing-content max-h-[240px] resize-none overflow-y-auto rounded border border-border bg-surface-inset px-3 py-1.5 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-bright focus:outline-none disabled:opacity-50"
+                className="field-sizing-content w-full max-h-[240px] wrap-anywhere resize-none overflow-y-auto rounded border border-border bg-surface-inset px-3 py-1.5 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-bright focus:outline-none disabled:opacity-50"
               />
               {preview !== undefined ? (
                 <pre className="max-h-[320px] overflow-auto rounded border border-border bg-surface-inset p-2 font-mono text-[11px] leading-relaxed text-text-secondary">
