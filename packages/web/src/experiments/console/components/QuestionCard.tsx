@@ -156,8 +156,10 @@ export function QuestionCard({
                   </span>
                 </label>
               ))}
-              <input
-                type="text"
+              {/* A textarea sized to its content: a single-line input ran long
+                  answers off to the right instead of wrapping. */}
+              <textarea
+                rows={1}
                 placeholder="Other"
                 value={other[q.question] ?? ''}
                 onChange={(e): void => {
@@ -167,7 +169,7 @@ export function QuestionCard({
                     setPicked(prev => ({ ...prev, [q.question]: [] }));
                   }
                 }}
-                className="rounded border border-border bg-surface-inset px-3 py-1.5 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-bright focus:outline-none disabled:opacity-50"
+                className="field-sizing-content max-h-[240px] resize-none overflow-y-auto rounded border border-border bg-surface-inset px-3 py-1.5 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-bright focus:outline-none disabled:opacity-50"
               />
               {preview !== undefined ? (
                 <pre className="max-h-[320px] overflow-auto rounded border border-border bg-surface-inset p-2 font-mono text-[11px] leading-relaxed text-text-secondary">
