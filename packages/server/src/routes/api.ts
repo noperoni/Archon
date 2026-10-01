@@ -5,6 +5,7 @@
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import { streamSSE } from 'hono/streaming';
 import { cors } from 'hono/cors';
+import { isAllowedOrigin, parseOrigins } from './request-guard';
 import type { WebAdapter } from '../adapters/web';
 import { boundMetadataToolOutputs } from '../adapters/web/truncate';
 import { rm, readFile, writeFile, unlink, mkdir, readdir, stat } from 'fs/promises';
@@ -1940,9 +1941,14 @@ export function registerApiRoutes(
     });
   }
 
-  // CORS for Web UI — allow-all is fine for a single-developer tool.
-  // Override with WEB_UI_ORIGIN env var to restrict if exposing publicly.
-  app.use('/api/*', cors({ origin: process.env.WEB_UI_ORIGIN || '*' }));
+  // CORS for the Web UI. HK-47 fork (PERS-30): upstream fell back to '*', which
+  // let any page in the browser read every reply. WEB_UI_ORIGIN is now a
+  // comma-separated list, and unset means loopback pages only.
+  const webOrigins = parseOrigins(process.env.WEB_UI_ORIGIN);
+  app.use(
+    '/api/*',
+    cors({ origin: origin => (origin && isAllowedOrigin(origin, webOrigins) ? origin : null) })
+  );
 
   // Server-side access gate: when web auth is enabled (and not opted out via
   // ARCHON_WEB_AUTH_REQUIRED=false), every /api/* request must resolve to an

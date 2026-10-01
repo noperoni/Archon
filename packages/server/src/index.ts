@@ -62,6 +62,8 @@ getVendorCatalog();
 
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import { validationErrorHook } from './routes/openapi-defaults';
+import { parseOrigins, requestGuard } from './routes/request-guard';
+import { HTTPException } from 'hono/http-exception';
 import {
   TelegramAdapter,
   GitHubAdapter,
@@ -691,8 +693,14 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
   const app = new OpenAPIHono({ defaultHook: validationErrorHook });
   const port = opts.port ?? (await getPort());
 
-  // Global error handler for unhandled exceptions
+  // HK-47 fork (PERS-30): Host and Origin checks before any route, static file,
+  // webhook or internal handler. See routes/request-guard.ts.
+  app.use('*', requestGuard(parseOrigins(process.env.WEB_UI_ORIGIN)));
+
+  // Global error handler for unhandled exceptions. A validator's HTTPException
+  // (malformed JSON) keeps its own 400 rather than becoming a 500.
   app.onError((err, c) => {
+    if (err instanceof HTTPException) return err.getResponse();
     getLog().error({ err, path: c.req.path, method: c.req.method }, 'unhandled_request_error');
     return c.json({ error: 'Internal server error' }, 500);
   });
