@@ -64,6 +64,7 @@ import { OpenAPIHono, z } from '@hono/zod-openapi';
 import { validationErrorHook } from './routes/openapi-defaults';
 import { parseOrigins, requestGuard } from './routes/request-guard';
 import { HTTPException } from 'hono/http-exception';
+import { secureHeaders } from 'hono/secure-headers';
 import {
   TelegramAdapter,
   GitHubAdapter,
@@ -696,6 +697,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
   // HK-47 fork (PERS-30): Host and Origin checks before any route, static file,
   // webhook or internal handler. See routes/request-guard.ts.
   app.use('*', requestGuard(parseOrigins(process.env.WEB_UI_ORIGIN)));
+  // No framing, no sniffing, no referrer, on every response the server sends.
+  app.use('*', secureHeaders());
 
   // Global error handler for unhandled exceptions. A validator's HTTPException
   // (malformed JSON) keeps its own 400 rather than becoming a 500.
@@ -941,6 +944,9 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
     hostname,
     port,
     idleTimeout: 255, // Max value (seconds) - prevents SSE connections from being killed
+    // PERS-30: Bun's default is 128MB, buffered before any handler's own size
+    // check. The largest legitimate body is 5 uploads of 10MB plus overhead.
+    maxRequestBodySize: 64 * 1024 * 1024,
   });
   getLog().info({ port: server.port, hostname }, 'server_listening');
 

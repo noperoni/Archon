@@ -8,7 +8,7 @@ import { cors } from 'hono/cors';
 import { isAllowedOrigin, parseOrigins } from './request-guard';
 import type { WebAdapter } from '../adapters/web';
 import { boundMetadataToolOutputs } from '../adapters/web/truncate';
-import { rm, readFile, writeFile, unlink, mkdir, readdir, stat } from 'fs/promises';
+import { rm, readFile, writeFile, unlink, mkdir, readdir, stat, realpath } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { normalize, join, sep, basename, dirname, resolve } from 'path';
 import { homedir } from 'os';
@@ -5587,7 +5587,14 @@ export function registerApiRoutes(
 
     let content: string;
     try {
-      content = await readFile(filePath, 'utf-8');
+      // PERS-30: the prefix check above is lexical; an agent-written symlink
+      // in the artifact dir would pass it. Compare the real paths too.
+      const [realFile, realDir] = await Promise.all([realpath(filePath), realpath(artifactDir)]);
+      if (!realFile.startsWith(realDir + sep)) {
+        getLog().warn({ runId, filename }, 'artifacts.symlink_escape_blocked');
+        return apiError(c, 400, 'Invalid filename');
+      }
+      content = await readFile(realFile, 'utf-8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         return apiError(c, 404, 'Artifact file not found');
@@ -5601,7 +5608,12 @@ export function registerApiRoutes(
       : 'text/plain; charset=utf-8';
     return new Response(content, {
       status: 200,
-      headers: { 'Content-Type': contentType },
+      headers: {
+        'Content-Type': contentType,
+        // Agent-written content: never sniffed into HTML, and inert if opened.
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "sandbox; default-src 'none'",
+      },
     });
   });
 

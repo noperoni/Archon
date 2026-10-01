@@ -65,9 +65,33 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    // HK-47 fork (PERS-30): live serves the built bundle through `vite preview`.
+    // No framing (clickjacking of run/approve buttons), no sniffing, and a CSP
+    // that would contain a future XSS: scripts and connections only to this
+    // origin. Dev keeps none of this, since HMR needs inline script.
+    preview: {
+      headers: {
+        'Content-Security-Policy': [
+          "default-src 'self'",
+          "script-src 'self'",
+          "connect-src 'self'",
+          "img-src 'self' data: blob:",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          'font-src https://fonts.gstatic.com',
+          "object-src 'none'",
+          "base-uri 'none'",
+          "frame-ancestors 'none'",
+          "form-action 'self'",
+        ].join('; '),
+        'X-Frame-Options': 'DENY',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+      },
+    },
     build: {
       outDir: 'dist',
-      sourcemap: true,
+      // Maps stay on disk for debugging but are not referenced by the bundle.
+      sourcemap: 'hidden',
     },
   };
 });
