@@ -696,7 +696,13 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
 
   // HK-47 fork (PERS-30): Host and Origin checks before any route, static file,
   // webhook or internal handler. See routes/request-guard.ts.
-  app.use('*', requestGuard(parseOrigins(process.env.WEB_UI_ORIGIN)));
+  app.use(
+    '*',
+    requestGuard(
+      parseOrigins(process.env.WEB_UI_ORIGIN),
+      process.env.ARCHON_PROXY_SECRET || undefined
+    )
+  );
   // No framing, no sniffing, no referrer, on every response the server sends.
   app.use('*', secureHeaders());
 
@@ -937,6 +943,12 @@ export async function startServer(opts: ServerOptions = {}): Promise<void> {
       { hostname, headerName: process.env.ARCHON_WEB_AUTH_HEADER || 'X-Archon-User' },
       'web_auth.header_trust_on_public_bind'
     );
+  }
+
+  // HK-47 fork (PERS-35): on a non-loopback bind without ARCHON_PROXY_SECRET,
+  // anything that can reach the port talks to the API around the proxy.
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost' && !process.env.ARCHON_PROXY_SECRET) {
+    getLog().warn({ hostname }, 'request_guard.no_proxy_secret_on_public_bind');
   }
 
   const server = Bun.serve({

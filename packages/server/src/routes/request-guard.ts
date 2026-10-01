@@ -11,8 +11,15 @@
  *   - Host must name this server (loopback, or a configured console hostname),
  *     which defeats DNS rebinding and direct hits on the LAN IP.
  *   - A state-changing request carrying Origin must come from a console origin.
+ *
+ * PERS-35 adds a third: with ARCHON_PROXY_SECRET set, a request from any peer
+ * but loopback must carry it in X-Archon-Proxy-Secret, which only the Traefik
+ * route injects. Host and Origin are client-chosen, so without it anything on
+ * the proxy host could reach the API around the proxy's IP allowlist.
  */
-import type { MiddlewareHandler } from 'hono';
+import { timingSafeEqual } from 'crypto';
+import type { Context, MiddlewareHandler } from 'hono';
+import { getConnInfo } from 'hono/bun';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
@@ -57,8 +64,45 @@ export function isAllowedOrigin(origin: string, origins: string[]): boolean {
   }
 }
 
-export function requestGuard(origins: string[]): MiddlewareHandler {
+export const PROXY_SECRET_HEADER = 'x-archon-proxy-secret';
+
+function isLoopbackAddress(address: string | undefined): boolean {
+  return (
+    address === '::1' ||
+    address?.startsWith('127.') === true ||
+    address?.startsWith('::ffff:127.') === true
+  );
+}
+
+/** True when the request came over loopback, or carries the proxy secret. */
+export function hasProxyTrust(
+  peer: string | undefined,
+  presented: string | undefined,
+  secret: string
+): boolean {
+  if (isLoopbackAddress(peer)) return true;
+  if (presented === undefined) return false;
+  const a = Buffer.from(presented);
+  const b = Buffer.from(secret);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function peerAddress(c: Context): string | undefined {
+  try {
+    return getConnInfo(c).remote.address;
+  } catch {
+    return undefined; // no Bun server in env (tests, app.request): not loopback
+  }
+}
+
+export function requestGuard(origins: string[], proxySecret?: string): MiddlewareHandler {
   return async (c, next) => {
+    if (
+      proxySecret &&
+      !hasProxyTrust(peerAddress(c), c.req.header(PROXY_SECRET_HEADER), proxySecret)
+    ) {
+      return c.json({ error: 'Forbidden' }, 403);
+    }
     if (!isAllowedHost(c.req.header('host'), origins)) {
       return c.json({ error: 'Unknown host' }, 421);
     }

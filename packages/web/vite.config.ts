@@ -62,6 +62,13 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: `http://localhost:${apiPort}`,
           changeOrigin: true,
+          // HK-47 fork (PERS-35): this hop reaches the API over loopback, which
+          // the server trusts without the proxy secret, so it serves loopback
+          // clients only. The reverse proxy routes /api to the server directly.
+          bypass: req => {
+            const peer = req.socket.remoteAddress ?? '';
+            return peer === '::1' || /^(::ffff:)?127\./.test(peer) ? undefined : false;
+          },
         },
       },
     },

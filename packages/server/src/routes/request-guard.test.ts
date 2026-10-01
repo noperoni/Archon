@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
-import { isAllowedHost, isAllowedOrigin, parseOrigins, requestGuard } from './request-guard';
+import {
+  hasProxyTrust,
+  isAllowedHost,
+  isAllowedOrigin,
+  parseOrigins,
+  PROXY_SECRET_HEADER,
+  requestGuard,
+} from './request-guard';
 
 const LIVE = parseOrigins('https://console.example.test, http://localhost:55173/');
 
@@ -82,5 +89,35 @@ describe('requestGuard', () => {
   test('opaque null origin is refused', async () => {
     const r = await a.fetch(req({ host: 'localhost', origin: 'null' }));
     expect(r.status).toBe(403);
+  });
+});
+
+// HK-47 fork (PERS-35): only loopback peers or the proxy's secret get through.
+describe('proxy secret', () => {
+  const SECRET = 'a-long-shared-secret';
+
+  test('loopback peers need no secret', () => {
+    for (const peer of ['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+      expect(hasProxyTrust(peer, undefined, SECRET)).toBe(true);
+  });
+
+  test('other peers need the exact secret', () => {
+    expect(hasProxyTrust('192.168.1.3', undefined, SECRET)).toBe(false);
+    expect(hasProxyTrust('192.168.1.3', 'wrong', SECRET)).toBe(false);
+    expect(hasProxyTrust('192.168.1.3', `${SECRET}x`, SECRET)).toBe(false);
+    expect(hasProxyTrust('192.168.1.3', SECRET, SECRET)).toBe(true);
+    expect(hasProxyTrust(undefined, SECRET, SECRET)).toBe(true);
+  });
+
+  test('the guard refuses a forged loopback Host without the secret', async () => {
+    const a = new Hono();
+    a.use('*', requestGuard([], SECRET));
+    a.all('/api/x', c => c.text('ran'));
+    const refused = await a.request(req({ host: 'localhost:53090' }, 'GET'));
+    expect(refused.status).toBe(403);
+    const admitted = await a.request(
+      req({ host: 'localhost:53090', [PROXY_SECRET_HEADER]: SECRET }, 'GET')
+    );
+    expect(await admitted.text()).toBe('ran');
   });
 });
