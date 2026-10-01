@@ -66,7 +66,9 @@ describe('requestGuard', () => {
     expect(r.status).toBe(421);
   });
   test('console POST passes', async () => {
-    const r = await a.fetch(req({ host: 'console.example.test', origin: 'https://console.example.test' }));
+    const r = await a.fetch(
+      req({ host: 'console.example.test', origin: 'https://console.example.test' })
+    );
     expect(await r.text()).toBe('ran');
   });
   test('local script POST without Origin passes', async () => {
