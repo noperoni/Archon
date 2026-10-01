@@ -3,7 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
-import { graphicPre } from './FencedGraphic';
+import { graphicPre, safeImg } from './FencedGraphic';
 import { AgentAvatar } from './AgentAvatar';
 import { CopyButton, useCopy } from './CopyButton';
 import { formatClock } from '../lib/format';
@@ -102,6 +102,7 @@ const MD_COMPONENTS: Components = {
   ),
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,
   pre: graphicPre(({ children }) => <CodeBlock>{children}</CodeBlock>),
+  img: safeImg,
   blockquote: ({ children }) => (
     <blockquote className="my-1 border-l-2 border-border pl-2 text-text-secondary">
       {children}

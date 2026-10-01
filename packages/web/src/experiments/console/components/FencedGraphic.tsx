@@ -119,12 +119,26 @@ const CATEGORY_TOKENS = [
 ];
 
 async function renderVegaSpec(el: HTMLElement, spec: Record<string, unknown>): Promise<() => void> {
-  const { default: embed } = await import('vega-embed');
+  const [{ default: embed }, { loader }] = await Promise.all([
+    import('vega-embed'),
+    import('vega'),
+  ]);
+  // PERS-30: a spec comes from agent output, so it may not touch the network.
+  // data.url could read /api/* with this origin's standing, and an image mark
+  // or href could beacon it anywhere on render. Inline data.values still works.
+  const offline = loader();
+  offline.load = (): Promise<string> => Promise.reject(new Error('charts take inline data only'));
+  offline.sanitize = (): Promise<{ href: string }> =>
+    Promise.reject(new Error('charts load no external resources'));
   const token = (name: string): string => tokenIn(name, el);
   const text = token('--text-secondary');
   const grid = token('--border');
   const surface = token('--surface-inset');
   const result = await embed(el, spec, {
+    loader: offline,
+    // Interpret expressions instead of compiling them with Function(): vega's
+    // codegen sandbox has been escaped before (CVE-2025-59840).
+    ast: true,
     actions: false,
     renderer: 'svg',
     tooltip: {
@@ -268,7 +282,29 @@ export function graphicPre(
   };
 }
 
+/**
+ * PERS-30: a markdown image from agent output would be fetched the moment the
+ * message renders, a zero-click beacon to any host. Same-origin and data:
+ * images draw; anything else becomes a link that loads only if clicked.
+ */
+export const safeImg: NonNullable<Components['img']> = ({ src, alt }) => {
+  const url = typeof src === 'string' ? src : '';
+  let local = url.startsWith('data:image/');
+  try {
+    local ||= new URL(url, window.location.href).origin === window.location.origin;
+  } catch {
+    local = false;
+  }
+  if (local) return <img src={url} alt={alt ?? ''} className="max-w-full" />;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="underline">
+      [image{alt ? `: ${alt}` : ''}]
+    </a>
+  );
+};
+
 /** Merge into a react-markdown `components` map that has no `pre` of its own. */
 export const GRAPHIC_COMPONENTS: Components = {
   pre: graphicPre(props => <pre {...props} />),
+  img: safeImg,
 };
