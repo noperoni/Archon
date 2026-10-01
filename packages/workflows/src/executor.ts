@@ -1903,6 +1903,29 @@ export async function executeWorkflow(
     throw error;
   }
 
+  // HK-47 fork (PERS-34): a cloned repo may not carry .claude/, .mcp.json or
+  // .archon/, checked against the run's own cwd since the worktree sync may have
+  // moved it past the clone-time check. Refused before its config is read.
+  if (codebaseId) {
+    // ponytail: a failed lookup skips the check, matching the identity resolver's
+    // degrade-on-fault below; fail closed if DB faults ever become attacker-driven.
+    const codebase = await deps.store.getCodebase(codebaseId).catch((err: unknown) => {
+      getLog().warn({ err, codebaseId }, 'workflow.untrusted_repo_check_skipped');
+      return null;
+    });
+    try {
+      if (codebase) await archonPaths.assertTrustedRepo(codebase.default_cwd, [cwd]);
+    } catch (error) {
+      if (preCreatedRun) {
+        await requireTerminalStatusWrite(
+          deps.store.failWorkflowRun(preCreatedRun.id, (error as Error).message),
+          { workflowRunId: preCreatedRun.id, site: 'workflow.untrusted_repo_fail_failed' }
+        );
+      }
+      throw error;
+    }
+  }
+
   // Load shared config once, then add this invocation's sparse layer at the
   // executor boundary. DB values remain below the run layer; protected
   // Archon-managed credentials are added later and keep their authority.

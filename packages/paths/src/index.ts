@@ -126,3 +126,13 @@ export type {
   TelemetryStatus,
   TelemetryDisabledReason,
 } from './telemetry';
+
+// HK-47 fork (PERS-34): cloned repos may not carry code-bearing paths
+export {
+  CODE_BEARING_PATHS,
+  UntrustedRepoError,
+  isManagedClone,
+  findCodeBearingPaths,
+  assertTrustedRepo,
+  isUnsafeEnvName,
+} from './untrusted-repo';

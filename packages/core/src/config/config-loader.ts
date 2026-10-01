@@ -39,7 +39,7 @@ import type {
   RawTiersConfig,
 } from './config-types';
 import { workflowContinuationConfigSchema } from './config-types';
-import { createLogger } from '@archon/paths';
+import { createLogger, isUnsafeEnvName } from '@archon/paths';
 import {
   isRegisteredProvider,
   getRegisteredProviders,
@@ -616,9 +616,16 @@ function mergeRepoConfig(merged: MergedConfig, repo: RepoConfig): MergedConfig {
     }
   }
 
-  // Propagate per-project env vars from repo config
+  // Propagate per-project env vars from repo config. HK-47 fork (PERS-34):
+  // names that load code or redirect the toolchain are dropped, the same rule
+  // PUT /api/codebases/:id/env enforces, since these reach every subprocess.
   if (repo.env) {
-    result.envVars = { ...result.envVars, ...repo.env };
+    const safe: Record<string, string> = {};
+    for (const [k, v] of Object.entries(repo.env)) {
+      if (isUnsafeEnvName(k)) getLog().warn({ key: k }, 'config.repo_env_unsafe_name_dropped');
+      else safe[k] = v;
+    }
+    result.envVars = { ...result.envVars, ...safe };
   }
 
   // Container backend settings — repo overrides global per-field.

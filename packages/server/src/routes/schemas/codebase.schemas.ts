@@ -3,6 +3,7 @@
  */
 import { z } from '@hono/zod-openapi';
 import { codebaseRowSchema } from '@archon/core/schemas/codebase';
+import { isUnsafeEnvName } from '@archon/paths';
 
 /** The Claude account a codebase runs under, read from its effective CLAUDE_CONFIG_DIR. */
 export const claudeAccountSchema = z.enum(['personal', 'work']).openapi('ClaudeAccount');
@@ -107,19 +108,18 @@ export const claudeSessionParamsSchema = z.object({ id: z.string(), sessionId: z
 /** Body for PUT /api/codebases/:id/env — upsert one key-value pair */
 export const setEnvVarBodySchema = z
   .object({
-    // HK-47 fork (PERS-30): these vars reach every agent spawn, so names that
-    // load code or redirect the toolchain (NODE_OPTIONS, LD_PRELOAD, BASH_ENV,
-    // PATH, GIT_SSH_COMMAND, CLAUDE_CONFIG_DIR, ...) are refused.
+    // HK-47 fork (PERS-30, widened by PERS-34): these vars reach every agent
+    // spawn, so names that load code, redirect the toolchain or send prompts
+    // and credentials elsewhere are refused. CLAUDE_CONFIG_DIR is the one
+    // exception: it is the account binding, and the route admits it only for a
+    // known account directory.
     key: z
       .string()
       .min(1)
       .max(255)
       .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'must be a plain variable name')
       .refine(
-        k =>
-          !/^(NODE_OPTIONS|NODE_PATH|BASH_ENV|ENV|PATH|HOME|SHELL|PYTHONPATH|PYTHONSTARTUP|PERL5OPT|RUBYOPT|BUN_OPTIONS|CLAUDE_CONFIG_DIR|CLAUDE_BIN_PATH|ARCHON_HOME|LD_.*|DYLD_.*|GIT_.*|.*_PROXY)$/i.test(
-            k
-          ),
+        k => k === 'CLAUDE_CONFIG_DIR' || !isUnsafeEnvName(k),
         'this variable name would let the value run code or redirect tools'
       ),
     value: z.string(),

@@ -29,7 +29,11 @@ import { safeDeactivateSession } from '../state/session-transitions';
 import { getAgentProvider, getProviderCapabilities } from '@archon/providers';
 import { QueryAbortedError } from '@archon/providers/errors';
 import { buildManageRunTool } from './manage-run-tool';
-import { getArchonWorkspacesPath, ensureArchonWorkspacesPath } from '@archon/paths';
+import {
+  getArchonWorkspacesPath,
+  ensureArchonWorkspacesPath,
+  assertTrustedRepo,
+} from '@archon/paths';
 import { resolveWorkflowSourceRoot } from '../utils/workflow-source-root';
 import {
   execFileAsync,
@@ -2221,6 +2225,15 @@ export async function handleMessage(
       codebase: discoveredCodebase,
       remote: syncRemote,
     } = await discoverAllWorkflows(conversation);
+    // HK-47 fork (PERS-34): the sync above may have fast-forwarded a cloned repo
+    // onto an upstream commit that adds .claude/, .mcp.json or .archon/. Refuse
+    // the turn before anything reads them.
+    if (discoveredCodebase) {
+      await assertTrustedRepo(discoveredCodebase.default_cwd, [
+        discoveredCodebase.default_cwd,
+        conversation.cwd ?? discoveredCodebase.default_cwd,
+      ]);
+    }
     const workflows: readonly WorkflowDefinition[] = workflowsWithSource.map(ws => ws.workflow);
     if (workflowErrors.length > 0) {
       getLog().warn(

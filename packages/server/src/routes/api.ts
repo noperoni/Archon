@@ -3869,6 +3869,13 @@ export function registerApiRoutes(
       const body = getValidatedBody(c, setEnvVarBodySchema);
       const codebase = await codebaseDb.getCodebase(id);
       if (!codebase) return apiError(c, 404, 'Codebase not found');
+      // HK-47 fork (PERS-34): the account binding may only name a known account.
+      if (
+        body.key === 'CLAUDE_CONFIG_DIR' &&
+        !Object.values(ACCOUNT_CONFIG_DIRS).some(d => body.value === join(homedir(), d))
+      ) {
+        return apiError(c, 400, 'CLAUDE_CONFIG_DIR must be one of the known account directories');
+      }
       await envVarDb.setCodebaseEnvVar(id, body.key, body.value);
       return c.json({ success: true });
     } catch (error) {

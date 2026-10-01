@@ -8,7 +8,7 @@
  * - Lazy logger pattern means @archon/paths mock must be set up before the module import
  */
 import { describe, test, expect, mock, beforeEach, afterAll, afterEach, spyOn } from 'bun:test';
-import { resolve } from 'path';
+import { join, resolve } from 'path';
 import * as fsPromises from 'fs/promises';
 import * as gitUtils from '@archon/git';
 import type { Codebase } from '../types';
@@ -86,6 +86,25 @@ mock.module('@archon/paths', () => ({
   ),
   ensureFolderProjectStructure: mock(() => Promise.resolve()),
   getFolderProjectRoot: mock((slug: string) => `/home/test/.archon/workspaces/_folder/${slug}`),
+  // Reads `fsPromises.access` at call time so each test's spy decides what the
+  // fresh clone carries.
+  findCodeBearingPaths: mock(async (root: string) => {
+    const found: string[] = [];
+    for (const p of ['.claude', '.mcp.json', '.archon']) {
+      try {
+        await fsPromises.access(join(root, p));
+        found.push(p);
+      } catch {
+        // absent
+      }
+    }
+    return found;
+  }),
+  UntrustedRepoError: class extends Error {
+    constructor(readonly found: string[]) {
+      super(`Refused: this cloned repository ships ${found.join(', ')}`);
+    }
+  },
 }));
 
 // ── config-loader mock ──────────────────────────────────────────────────────
@@ -860,7 +879,7 @@ describe('cloneRepository', () => {
       spyFsAccess.mockImplementation((path: string) => {
         if (
           typeof path === 'string' &&
-          /(\.git|settings(\.local)?\.json|\.mcp\.json)$/.test(path)
+          /(\.git|settings(\.local)?\.json|\.mcp\.json|\/\.claude|\/\.archon)$/.test(path)
         ) {
           return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
         }
@@ -894,7 +913,7 @@ describe('cloneRepository', () => {
       spyFsAccess.mockImplementation((path: string) => {
         if (
           typeof path === 'string' &&
-          /(\.git|settings(\.local)?\.json|\.mcp\.json)$/.test(path)
+          /(\.git|settings(\.local)?\.json|\.mcp\.json|\/\.claude|\/\.archon)$/.test(path)
         ) {
           return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
         }
@@ -983,22 +1002,20 @@ describe('cloneRepository', () => {
       expect(createCall[0].ai_assistant_type).toBe('claude');
     });
 
-    test('detects claude assistant when .claude folder exists but .codex does not', async () => {
+    // HK-47 fork (PERS-34): a clone carrying .claude/ is refused before
+    // assistant detection runs, so it is never registered at all.
+    test('refuses a clone with a .claude folder instead of detecting claude from it', async () => {
       spyFsAccess.mockImplementation((path: string) => {
-        // .codex → ENOENT, .claude → exists, .git → ENOENT, commands → ENOENT
         if (typeof path === 'string' && path.endsWith('.claude')) {
           return Promise.resolve(undefined);
         }
         return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
       });
-      mockCreateCodebase.mockResolvedValueOnce(
-        makeCodebase({ ai_assistant_type: 'claude' }) as ReturnType<typeof makeCodebase>
+
+      await expect(cloneRepository('https://github.com/owner/repo')).rejects.toThrow(
+        /ships .claude$/
       );
-
-      await cloneRepository('https://github.com/owner/repo');
-
-      const createCall = mockCreateCodebase.mock.calls[0] as [{ ai_assistant_type: string }];
-      expect(createCall[0].ai_assistant_type).toBe('claude');
+      expect(mockCreateCodebase.mock.calls.length).toBe(0);
     });
   });
 });
@@ -1611,7 +1628,19 @@ describe('cloneRepository refuses repos that ship hooks (PERS-30)', () => {
         : Promise.resolve(undefined)
     );
     await expect(cloneRepository('https://github.com/owner/hooked')).rejects.toThrow(
-      /ships .claude\/settings.json/
+      /ships .claude, .mcp.json, .archon/
     );
+  });
+
+  test('a fresh clone carrying only .archon/ is refused too (PERS-34)', async () => {
+    spyFsAccess.mockImplementation((path: string) =>
+      typeof path === 'string' && path.endsWith('/.archon')
+        ? Promise.resolve(undefined)
+        : Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
+    );
+    await expect(cloneRepository('https://github.com/owner/workflowed')).rejects.toThrow(
+      /ships .archon$/
+    );
+    expect(spyFsRm).toHaveBeenCalled();
   });
 });

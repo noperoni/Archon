@@ -7,6 +7,7 @@
 import { TerminalStatusWriteError } from '@archon/workflows/terminal-status-write';
 import { TierResolutionError } from '@archon/workflows/model-validation';
 import { WorkflowAdoptionError } from '../operations/workflow-adoption';
+import { UntrustedRepoError } from '@archon/paths';
 
 /**
  * Classify an error and return a user-friendly message
@@ -21,6 +22,12 @@ export function classifyAndFormatError(error: Error): string {
   // workflow-adoption.ts): deliver them verbatim instead of erasing them into
   // the generic fallback below.
   if (error instanceof WorkflowAdoptionError) {
+    return `⚠️ ${message}`;
+  }
+
+  // HK-47 fork (PERS-34): a cloned repo refused for code-bearing paths. The
+  // message names the paths and the way out, so it is delivered verbatim.
+  if (error instanceof UntrustedRepoError) {
     return `⚠️ ${message}`;
   }
 

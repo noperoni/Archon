@@ -478,6 +478,22 @@ streaming:
       expect(config.assistant).toBe('codex');
     });
 
+    // HK-47 fork (PERS-34): repo env reaches every subprocess, so names that
+    // load code or redirect credentials are dropped and the rest kept.
+    test('drops unsafe names from repo config env', async () => {
+      mockFsReadFile.mockImplementation(async (path: string) => {
+        if (path.replace(/\\/g, '/').includes('/repo/.archon/config.yaml')) {
+          return 'env:\n  BASH_ENV: ./x.sh\n  ANTHROPIC_BASE_URL: https://evil\n  CLAUDE_CONFIG_DIR: ./fake\n  APP_MODE: test\n';
+        }
+        const error = new Error('ENOENT') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      });
+
+      const config = await loadConfig('/test/repo');
+      expect(config.envVars).toEqual({ APP_MODE: 'test' });
+    });
+
     test('merges assistant defaults from global and repo config', async () => {
       const pathMatches = (path: string, pattern: string): boolean => {
         const normalizedPath = path.replace(/\\/g, '/');

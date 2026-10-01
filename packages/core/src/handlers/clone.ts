@@ -21,7 +21,7 @@ import {
   slugifyFolderName,
 } from '@archon/paths';
 import { findMarkdownFilesRecursive } from '../utils/commands';
-import { createLogger } from '@archon/paths';
+import { createLogger, findCodeBearingPaths, UntrustedRepoError } from '@archon/paths';
 import { resolveDefaultAssistant } from '../config/resolve-assistant';
 
 /** Lazy-initialized logger (deferred so test mocks can intercept createLogger) */
@@ -405,27 +405,15 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
     throw new Error(`Failed to clone repository: ${safeErr.message}`);
   }
 
-  // HK-47 fork (PERS-30, Master's ruling): never load hooks from a cloned repo.
-  // Claude runs here with settingSources 'project', so a repo's own settings or
-  // MCP config would execute on the first turn with no trust prompt. A repo
-  // that ships them is removed again and refused; repos added by path are
-  // folders Master already works in.
-  const hookFiles = ['.claude/settings.json', '.claude/settings.local.json', '.mcp.json'];
-  const shipped: string[] = [];
-  for (const f of hookFiles) {
-    try {
-      await access(join(targetPath, f));
-      shipped.push(f);
-    } catch {
-      // absent
-    }
-  }
+  // HK-47 fork (PERS-30, widened by PERS-34, Master's ruling): never load code
+  // from a cloned repo. A repo that ships .claude/, .mcp.json or .archon/ is
+  // removed again and refused; repos added by path are folders Master already
+  // works in. The orchestrator and the workflow executor repeat this check
+  // after every sync.
+  const shipped = await findCodeBearingPaths(targetPath);
   if (shipped.length > 0) {
     await rm(targetPath, { recursive: true, force: true });
-    throw new Error(
-      `Refused: this repository ships ${shipped.join(', ')}, which would run its own hooks or tools. ` +
-        'Clone it in a terminal, review those files, then add the folder by path.'
-    );
+    throw new UntrustedRepoError(shipped);
   }
 
   // Add to git safe.directory
