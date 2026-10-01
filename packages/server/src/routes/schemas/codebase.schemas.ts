@@ -107,7 +107,21 @@ export const claudeSessionParamsSchema = z.object({ id: z.string(), sessionId: z
 /** Body for PUT /api/codebases/:id/env — upsert one key-value pair */
 export const setEnvVarBodySchema = z
   .object({
-    key: z.string().min(1).max(255),
+    // HK-47 fork (PERS-30): these vars reach every agent spawn, so names that
+    // load code or redirect the toolchain (NODE_OPTIONS, LD_PRELOAD, BASH_ENV,
+    // PATH, GIT_SSH_COMMAND, CLAUDE_CONFIG_DIR, ...) are refused.
+    key: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'must be a plain variable name')
+      .refine(
+        k =>
+          !/^(NODE_OPTIONS|NODE_PATH|BASH_ENV|ENV|PATH|HOME|SHELL|PYTHONPATH|PYTHONSTARTUP|PERL5OPT|RUBYOPT|BUN_OPTIONS|CLAUDE_CONFIG_DIR|CLAUDE_BIN_PATH|ARCHON_HOME|LD_.*|DYLD_.*|GIT_.*|.*_PROXY)$/i.test(
+            k
+          ),
+        'this variable name would let the value run code or redirect tools'
+      ),
     value: z.string(),
   })
   .openapi('SetEnvVarBody');

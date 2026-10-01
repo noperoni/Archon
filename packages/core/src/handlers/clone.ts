@@ -296,6 +296,18 @@ function normalizeRepoUrl(rawUrl: string): {
   const repoName = urlParts.pop() ?? 'unknown';
   const ownerName = urlParts.pop() ?? 'unknown';
 
+  // HK-47 fork (PERS-30): owner and repo become path segments, and the URL is
+  // handed to git. Refuse '..' traversal (https://h/../.. reached ~/source,
+  // which a failed clone then rm -rf'd) and anything but https/ssh remotes.
+  if (!workingUrl.startsWith('https://')) {
+    throw new Error('Only https:// and git@host:owner/repo URLs can be cloned');
+  }
+  for (const part of [ownerName, repoName]) {
+    if (!/^[\w.-]+$/.test(part) || /^\.+$/.test(part)) {
+      throw new Error(`Invalid repository path segment: ${part}`);
+    }
+  }
+
   // Clone into project-centric source/ directory
   const targetPath = getProjectSourcePath(ownerName, repoName);
 
@@ -385,7 +397,7 @@ export async function cloneRepository(repoUrl: string): Promise<RegisterResult> 
   try {
     // GIT_TERMINAL_PROMPT=0 turns any missing-creds scenario into an
     // immediate, readable error instead of a hung stdin credential prompt.
-    await execFileAsync('git', ['clone', cloneUrl, targetPath], {
+    await execFileAsync('git', ['clone', '--', cloneUrl, targetPath], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     });
   } catch (error) {
