@@ -858,7 +858,10 @@ describe('cloneRepository', () => {
     test('loads commands when .archon/commands directory exists with markdown files', async () => {
       // access(): .git → ENOENT (proceed to clone), everything else → success (assistant + commands)
       spyFsAccess.mockImplementation((path: string) => {
-        if (typeof path === 'string' && path.endsWith('.git')) {
+        if (
+          typeof path === 'string' &&
+          /(\.git|settings(\.local)?\.json|\.mcp\.json)$/.test(path)
+        ) {
           return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
         }
         return Promise.resolve(undefined);
@@ -889,7 +892,10 @@ describe('cloneRepository', () => {
     test('returns commandCount 0 when command folder exists but contains no markdown files', async () => {
       // access(): .git → ENOENT, command folder → success
       spyFsAccess.mockImplementation((path: string) => {
-        if (typeof path === 'string' && path.endsWith('.git')) {
+        if (
+          typeof path === 'string' &&
+          /(\.git|settings(\.local)?\.json|\.mcp\.json)$/.test(path)
+        ) {
           return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
         }
         return Promise.resolve(undefined);
@@ -913,7 +919,10 @@ describe('cloneRepository', () => {
         if (typeof path === 'string' && path.endsWith('.codex')) {
           return Promise.resolve(undefined);
         }
-        if (typeof path === 'string' && path.endsWith('.git')) {
+        if (
+          typeof path === 'string' &&
+          /(\.git|settings(\.local)?\.json|\.mcp\.json)$/.test(path)
+        ) {
           callIndex++;
           // First call is the .git existence check (must REJECT to proceed to clone)
           if (callIndex === 1)
@@ -1591,5 +1600,18 @@ describe('cloneRepository URL validation (PERS-30)', () => {
     ['ext::sh -c id', /Only https/],
   ])('refuses %s before running git', async (url, msg) => {
     await expect(cloneRepository(url)).rejects.toThrow(msg);
+  });
+});
+
+describe('cloneRepository refuses repos that ship hooks (PERS-30)', () => {
+  test('a fresh clone carrying .claude/settings.json is removed and refused', async () => {
+    spyFsAccess.mockImplementation((path: string) =>
+      typeof path === 'string' && path.endsWith('.git')
+        ? Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
+        : Promise.resolve(undefined)
+    );
+    await expect(cloneRepository('https://github.com/owner/hooked')).rejects.toThrow(
+      /ships .claude\/settings.json/
+    );
   });
 });
