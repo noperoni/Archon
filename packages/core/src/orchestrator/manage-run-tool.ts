@@ -42,7 +42,18 @@ export interface ManageRunContext {
    * the tool then says so rather than implying the run moves on by itself.
    */
   onGateResolved?: (run: WorkflowRun, action: 'approve' | 'reject' | 'respond') => boolean;
+  /**
+   * HK-47 fork, PERS-30 F11: asks the human (an Allow/Deny card) before `start`
+   * or a confirmed destructive action runs, because the model's `confirm: true`
+   * is the model's word, and text it read may have put it there. True only on
+   * an explicit Allow. Omitted where no human can be asked: those actions are
+   * then refused.
+   */
+  confirm?: (question: string, detail: Record<string, unknown>) => Promise<boolean>;
 }
+
+const NOT_ALLOWED =
+  'The user did not allow this (declined, dismissed, or there is no console to ask in). Do not retry unless they ask you to.';
 
 /**
  * Actions that require an explicit `confirm: true` before they run. `cancel`
@@ -51,9 +62,9 @@ export interface ManageRunContext {
  * even when an agent is driving. `resume` is intentionally NOT here — it only
  * validates eligibility and changes nothing, so it's recoverable. Without
  * confirm the tool returns a preview and asks the agent to check with the user
- * first: a model-visible two-step that creates an audit point and a natural
- * place to involve the human, since there is no mid-turn UI-confirm primitive
- * to block on.
+ * first: a model-visible two-step that creates an audit point. The confirmed
+ * call then goes to the human as a card (`ctx.confirm`, PERS-30 F11), since the
+ * model's `confirm: true` alone proves nothing.
  */
 const DESTRUCTIVE_ACTIONS = new Set(['cancel', 'abandon', 'approve', 'reject', 'respond']);
 
@@ -323,6 +334,10 @@ async function handleStart(ctx: ManageRunContext, input: Record<string, unknown>
   if (workflow === '') return 'manage_run: action=start requires a workflow name.';
   const message = typeof input.message === 'string' ? input.message.trim() : '';
   log.info({ codebaseId: ctx.codebaseId, workflow }, 'manage_run.start_requested');
+  if (!((await ctx.confirm?.(`Start workflow ${workflow}?`, { workflow, message })) ?? false)) {
+    log.info({ codebaseId: ctx.codebaseId, workflow }, 'manage_run.start_refused');
+    return `manage_run: not started. ${NOT_ALLOWED}`;
+  }
   return await ctx.startWorkflow(workflow, message);
 }
 
@@ -377,6 +392,23 @@ async function handleWrite(
   }
 
   log.info({ runId: run.id, action }, 'manage_run.write_requested');
+
+  if (DESTRUCTIVE_ACTIONS.has(action)) {
+    const allowed =
+      (await ctx.confirm?.(`${action} run ${run.id.slice(0, 8)} (${run.workflow_name})?`, {
+        action,
+        run: run.id,
+        workflow: run.workflow_name,
+        status: run.status,
+        ...(decision ? { decision } : {}),
+        ...(message ? { message } : {}),
+        ...(action === 'approve' ? { finalize: willFinalize } : {}),
+      })) ?? false;
+    if (!allowed) {
+      log.info({ runId: run.id, action }, 'manage_run.write_refused');
+      return `manage_run: ${action} not done. ${NOT_ALLOWED}`;
+    }
+  }
 
   // Use the verified full id from `getScopedRun`, not the (possibly short) input
   // — the operations below look runs up by exact id.

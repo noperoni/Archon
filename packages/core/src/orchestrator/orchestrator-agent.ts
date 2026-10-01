@@ -29,6 +29,7 @@ import { safeDeactivateSession } from '../state/session-transitions';
 import { getAgentProvider, getProviderCapabilities } from '@archon/providers';
 import { QueryAbortedError } from '@archon/providers/errors';
 import { buildManageRunTool } from './manage-run-tool';
+import { confirmWithHuman, type AskHuman } from './human-confirm';
 import {
   getArchonWorkspacesPath,
   ensureArchonWorkspacesPath,
@@ -2582,6 +2583,14 @@ export async function handleMessage(
       requestOptions.nativeTools = [
         buildManageRunTool({
           codebaseId: scopedCodebaseId,
+          // PERS-30 F11: start and the destructive actions wait for a click.
+          confirm: (question, detail) =>
+            confirmWithHuman(
+              requestOptions.onUserQuestion,
+              question,
+              detail,
+              requestOptions.abortSignal
+            ),
           // One continuation per turn: the resume runs in this conversation and
           // to completion, so a second gate resolved in the same turn is
           // declined rather than silently dropped (the tool tells the agent).
@@ -2962,7 +2971,9 @@ async function handleStreamMode(
       originalMessage,
       isolationHints,
       issueContext,
-      userId
+      userId,
+      requestOptions?.onUserQuestion,
+      requestOptions?.abortSignal
     );
     return;
   }
@@ -2975,7 +2986,9 @@ async function handleStreamMode(
       platform,
       conversationId,
       fullResponse,
-      commands.projectRegistration
+      commands.projectRegistration,
+      requestOptions?.onUserQuestion,
+      requestOptions?.abortSignal
     );
     return;
   }
@@ -3243,7 +3256,9 @@ async function handleBatchMode(
       originalMessage,
       isolationHints,
       issueContext,
-      userId
+      userId,
+      requestOptions?.onUserQuestion,
+      requestOptions?.abortSignal
     );
     return;
   }
@@ -3256,7 +3271,9 @@ async function handleBatchMode(
       platform,
       conversationId,
       finalMessage,
-      commands.projectRegistration
+      commands.projectRegistration,
+      requestOptions?.onUserQuestion,
+      requestOptions?.abortSignal
     );
     return;
   }
@@ -3329,7 +3346,9 @@ async function handleWorkflowInvocationResult(
   originalMessage: string,
   isolationHints: HandleMessageContext['isolationHints'],
   issueContext?: string,
-  userId?: string
+  userId?: string,
+  ask?: AskHuman,
+  signal?: AbortSignal
 ): Promise<void> {
   const { workflowName, projectName, remainingMessage } = invocation;
 
@@ -3350,6 +3369,24 @@ async function handleWorkflowInvocationResult(
 
   if (codebase && workflow) {
     const workflowPrompt = invocation.synthesizedPrompt ?? originalMessage;
+    // PERS-30 F11: the model's command, not the user's, so a click decides.
+    const allowed = await confirmWithHuman(
+      ask,
+      `Run workflow ${workflow.name} on ${codebase.name}?`,
+      { workflow: workflow.name, project: codebase.name, prompt: workflowPrompt },
+      signal
+    );
+    if (!allowed) {
+      getLog().info(
+        { workflowName, projectName, hasChannel: ask !== undefined },
+        'orchestrator.model_command_refused'
+      );
+      await platform.sendMessage(
+        conversationId,
+        modelCommandRefusal(ask, `workflow \`${workflow.name}\``)
+      );
+      return;
+    }
     getLog().debug(
       {
         source: invocation.synthesizedPrompt ? 'synthesized' : 'original',
@@ -3398,7 +3435,9 @@ async function handleProjectRegistrationResult(
   platform: IPlatformAdapter,
   conversationId: string,
   fullResponse: string,
-  registration: ProjectRegistration
+  registration: ProjectRegistration,
+  ask?: AskHuman,
+  signal?: AbortSignal
 ): Promise<void> {
   const { projectName, projectPath } = registration;
 
@@ -3421,6 +3460,25 @@ async function handleProjectRegistrationResult(
     await platform.sendMessage(conversationId, textBeforeReg);
   }
 
+  // PERS-30 F11: the path is free text from the model, so a click decides.
+  const allowed = await confirmWithHuman(
+    ask,
+    `Register project ${projectName} at ${projectPath}?`,
+    { project: projectName, path: projectPath },
+    signal
+  );
+  if (!allowed) {
+    getLog().info(
+      { projectName, hasChannel: ask !== undefined },
+      'orchestrator.model_command_refused'
+    );
+    await platform.sendMessage(
+      conversationId,
+      modelCommandRefusal(ask, `project registration for \`${projectName}\``)
+    );
+    return;
+  }
+
   // Register the project
   const regResult = await handleRegisterProject(
     `/register-project ${projectName} ${projectPath}`,
@@ -3431,6 +3489,13 @@ async function handleProjectRegistrationResult(
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────────────
+
+/** What the user reads when a model-emitted command was not run. */
+function modelCommandRefusal(ask: AskHuman, what: string): string {
+  return ask === undefined
+    ? `Not run: ${what} was proposed by the model, and model commands run only after a click in the web console.`
+    : `Not run: ${what} was declined.`;
+}
 
 /**
  * Handle /register-project command.

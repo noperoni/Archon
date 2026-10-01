@@ -87,6 +87,11 @@ const mockCaptureApprovalResolved = mock(() => undefined);
 // literal: it makes a path absolute, and on Windows `resolve('/path')` is
 // drive-qualified (`D:\path`).
 const { canonicalizeProjectPath } = await import('@archon/paths');
+// PERS-30 F11: model-emitted commands wait for a human click. These tests
+// exercise what follows an Allow; refusals are asserted where they matter.
+const mockConfirmWithHuman = mock((..._args: unknown[]) => Promise.resolve(true));
+mock.module('./human-confirm', () => ({ confirmWithHuman: mockConfirmWithHuman }));
+
 mock.module('@archon/paths', () => ({
   captureApprovalResolved: mockCaptureApprovalResolved,
   createLogger: mock(() => mockLogger),

@@ -92,7 +92,7 @@ beforeEach(() => {
 
 describe('manage_run — progressive disclosure', () => {
   test('help overview lists every action', async () => {
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'help' });
     expect(out).toContain('manage_run');
     for (const a of ['list', 'get', 'start', 'resume', 'cancel', 'abandon', 'approve', 'reject']) {
@@ -101,20 +101,20 @@ describe('manage_run — progressive disclosure', () => {
   });
 
   test('help with subtool returns that action’s detail', async () => {
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'help', subtool: 'approve' });
     expect(out).toContain('approve');
     expect(out).toContain('confirm=true');
   });
 
   test('help with unknown subtool is explicit', async () => {
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'help', subtool: 'nope' });
     expect(out).toContain("no help for 'nope'");
   });
 
   test('unknown action points to help', async () => {
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'frobnicate' });
     expect(out).toContain('unknown action');
   });
@@ -133,7 +133,7 @@ describe('manage_run — reads', () => {
         },
       ],
     });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'list' });
     expect(out).toContain('abcdef12');
     expect(out).toContain('plan/3');
@@ -142,19 +142,19 @@ describe('manage_run — reads', () => {
 
   test('list with no runs is friendly', async () => {
     mockListDashboardRuns.mockResolvedValue({ runs: [] });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     expect(await tool.handler({ action: 'list' })).toContain('No workflow runs');
   });
 
   test('get requires a runId', async () => {
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     expect(await tool.handler({ action: 'get' })).toContain('requires a runId');
   });
 
   test('get is project-scoped — the lookup is constrained to this codebase', async () => {
     // The query is scoped to the codebase, so a foreign run never comes back.
     mockFindByPrefix.mockResolvedValue([]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'get', runId: 'r1abcdef' });
     expect(out).toContain('no run found');
     expect(mockFindByPrefix).toHaveBeenCalledWith('r1abcdef', CODEBASE_ID);
@@ -162,7 +162,7 @@ describe('manage_run — reads', () => {
 
   test('get with an ambiguous prefix asks for more characters', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ id: 'r1ab1111' }), makeRun({ id: 'r1ab2222' })]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'get', runId: 'r1ab' });
     expect(out).toContain('matches more than one run');
   });
@@ -171,7 +171,7 @@ describe('manage_run — reads', () => {
     mockFindByPrefix.mockResolvedValue([
       makeRun({ status: 'completed', completed_at: new Date('2026-06-01T01:00:00.000Z') }),
     ]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'get', runId: 'r1abcdef' });
     expect(out).toContain('status: completed');
     expect(out).toContain('finished:');
@@ -188,7 +188,7 @@ describe('manage_run — reads', () => {
         completed_at: '2026-07-10 18:30:00' as unknown as Date,
       }),
     ]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'get', runId: 'r1abcdef' });
     expect(out).not.toContain('manage_run error');
     expect(out).toContain('started: 2026-07-10 18:26:36');
@@ -211,7 +211,7 @@ describe('manage_run — reads', () => {
         },
       }),
     ]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'get', runId: 'r1abcdef' });
     expect(out).toContain('gate: awaiting approval (node refine, iteration 3)');
     expect(out).toContain('completionSignaled: true');
@@ -236,30 +236,86 @@ describe('manage_run — reads', () => {
         },
       }),
     ]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'get', runId: 'r1abcdef' });
     expect(out).toContain('completionSignaled: false');
     expect(out).not.toContain('FINALIZE');
   });
 });
 
+// The human's click (PERS-30 F11). Fixtures that exercise a write allow it;
+// the refusal tests below build the tool with a denying confirm or none.
+const allow = (): Promise<boolean> => Promise.resolve(true);
+
+describe('manage_run — human confirm (PERS-30 F11)', () => {
+  test('start is refused without a human channel, and nothing dispatches', async () => {
+    const startWorkflow = mock((_w: string, _m: string) => Promise.resolve('dispatched'));
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, startWorkflow });
+    const out = await tool.handler({ action: 'start', workflow: 'plan' });
+    expect(out).toContain('not started');
+    expect(startWorkflow).not.toHaveBeenCalled();
+  });
+
+  test('start is refused when the human denies, and the card names the workflow', async () => {
+    const startWorkflow = mock((_w: string, _m: string) => Promise.resolve('dispatched'));
+    const confirm = mock((_q: string, _d: Record<string, unknown>) => Promise.resolve(false));
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, startWorkflow, confirm });
+    const out = await tool.handler({ action: 'start', workflow: 'plan', message: 'x' });
+    expect(out).toContain('not started');
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenCalledWith('Start workflow plan?', {
+      workflow: 'plan',
+      message: 'x',
+    });
+  });
+
+  test('a confirmed approve is refused without a human channel, and the gate is untouched', async () => {
+    mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
+    mockApprove.mockClear();
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const out = await tool.handler({ action: 'approve', runId: 'r1abcdef', confirm: true });
+    expect(out).toContain('approve not done');
+    expect(mockApprove).not.toHaveBeenCalled();
+  });
+
+  test('a confirmed cancel is refused when the human denies', async () => {
+    mockFindByPrefix.mockResolvedValue([makeRun({ status: 'running' })]);
+    mockAbandon.mockClear();
+    const tool = buildManageRunTool({
+      codebaseId: CODEBASE_ID,
+      confirm: () => Promise.resolve(false),
+    });
+    const out = await tool.handler({ action: 'cancel', runId: 'r1abcdef', confirm: true });
+    expect(out).toContain('cancel not done');
+    expect(mockAbandon).not.toHaveBeenCalled();
+  });
+
+  test('resume is not destructive and needs no click', async () => {
+    mockFindByPrefix.mockResolvedValue([makeRun({ status: 'failed' })]);
+    const confirm = mock((_q: string, _d: Record<string, unknown>) => Promise.resolve(false));
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm });
+    await tool.handler({ action: 'resume', runId: 'r1abcdef' });
+    expect(confirm).not.toHaveBeenCalled();
+  });
+});
+
 describe('manage_run — start', () => {
   test('start delegates to the injected closure with workflow + message', async () => {
     const startWorkflow = mock((_w: string, _m: string) => Promise.resolve('dispatched'));
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, startWorkflow });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow, startWorkflow });
     const out = await tool.handler({ action: 'start', workflow: 'plan', message: 'add dark mode' });
     expect(out).toBe('dispatched');
     expect(startWorkflow).toHaveBeenCalledWith('plan', 'add dark mode');
   });
 
   test('start without a dispatch context is rejected', async () => {
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     expect(await tool.handler({ action: 'start', workflow: 'plan' })).toContain('not available');
   });
 
   test('start requires a workflow name', async () => {
     const startWorkflow = mock((_w: string, _m: string) => Promise.resolve('x'));
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, startWorkflow });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow, startWorkflow });
     expect(await tool.handler({ action: 'start' })).toContain('requires a workflow');
     expect(startWorkflow).not.toHaveBeenCalled();
   });
@@ -270,7 +326,7 @@ describe('manage_run — destructive confirmation gate', () => {
   // This covers the whole DESTRUCTIVE_ACTIONS set so dropping a member is caught.
   test('cancel without confirm previews and does NOT mutate', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun()]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'cancel', runId: 'r1abcdef' });
     expect(out).toContain('confirm: true');
     expect(out).toContain('irreversible');
@@ -279,7 +335,7 @@ describe('manage_run — destructive confirmation gate', () => {
 
   test('abandon without confirm previews and does NOT mutate', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'failed' })]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'abandon', runId: 'r1abcdef' });
     expect(out).toContain('confirm: true');
     expect(mockAbandon).not.toHaveBeenCalled();
@@ -287,7 +343,7 @@ describe('manage_run — destructive confirmation gate', () => {
 
   test('approve without confirm previews the human gate and does NOT mutate', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'approve', runId: 'r1abcdef' });
     expect(out).toContain('confirm: true');
     expect(out).toContain('human gate');
@@ -296,7 +352,7 @@ describe('manage_run — destructive confirmation gate', () => {
 
   test('reject without confirm previews the human gate and does NOT mutate', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'reject', runId: 'r1abcdef' });
     expect(out).toContain('confirm: true');
     expect(out).toContain('human gate');
@@ -310,7 +366,7 @@ describe('manage_run — destructive confirmation gate', () => {
       cascadeFailures: 0,
       blockedParentRunId: null,
     });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'cancel', runId: 'r1abcdef', confirm: true });
     expect(out).toContain('Cancelled');
     // Operations are called with the resolved full id, not the short prefix.
@@ -320,7 +376,7 @@ describe('manage_run — destructive confirmation gate', () => {
   test('approve with confirm passes the comment through (approval gate)', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
     mockApprove.mockResolvedValue({ workflowName: 'wf', type: 'approval_gate' });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({
       action: 'approve',
       runId: 'r1abcdef',
@@ -334,7 +390,7 @@ describe('manage_run — destructive confirmation gate', () => {
   test('approve with confirm and no message on an interactive loop reports the finalize semantics (#2074)', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
     mockApprove.mockResolvedValue({ workflowName: 'wf', type: 'interactive_loop' });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'approve', runId: 'r1abcdef', confirm: true });
     expect(mockApprove).toHaveBeenCalledWith('r1abcdef-1234', undefined);
     expect(out).toContain('no feedback');
@@ -345,7 +401,7 @@ describe('manage_run — destructive confirmation gate', () => {
   test('approve with accept:true finalizes even when a message is present (#2074 E)', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
     mockApprove.mockResolvedValue({ workflowName: 'wf', type: 'interactive_loop' });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({
       action: 'approve',
       runId: 'r1abcdef',
@@ -361,7 +417,7 @@ describe('manage_run — destructive confirmation gate', () => {
   test('approve with a message on an interactive loop records feedback (iterate) (#2074 E)', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
     mockApprove.mockResolvedValue({ workflowName: 'wf', type: 'interactive_loop' });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({
       action: 'approve',
       runId: 'r1abcdef',
@@ -388,7 +444,7 @@ describe('manage_run — destructive confirmation gate', () => {
         },
       }),
     ]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     // No confirm → preview. Bare args would finalize.
     const bare = await tool.handler({ action: 'approve', runId: 'r1abcdef' });
     expect(bare).toContain('completion condition was met');
@@ -409,7 +465,7 @@ describe('manage_run — destructive confirmation gate', () => {
       cancelled: true,
       maxAttemptsReached: false,
     });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({
       action: 'reject',
       runId: 'r1abcdef',
@@ -427,7 +483,7 @@ describe('manage_run — destructive confirmation gate', () => {
       cancelled: true,
       maxAttemptsReached: false,
     });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     await tool.handler({ action: 'reject', runId: 'r1abcdef', confirm: true });
     expect(mockReject).toHaveBeenCalledWith('r1abcdef-1234', 'Rejected');
   });
@@ -439,7 +495,7 @@ describe('manage_run — destructive confirmation gate', () => {
       cancelled: false,
       maxAttemptsReached: false,
     });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({
       action: 'reject',
       runId: 'r1abcdef',
@@ -455,7 +511,7 @@ describe('manage_run — destructive confirmation gate', () => {
   // full cancel it never asked for.
   test('respond without confirm previews the human gate and does NOT mutate', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'respond', runId: 'r1abcdef', decision: 'revise' });
     expect(out).toContain('confirm: true');
     expect(out).toContain('human gate');
@@ -464,7 +520,7 @@ describe('manage_run — destructive confirmation gate', () => {
 
   test('respond requires a decision even with confirm:true', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'respond', runId: 'r1abcdef', confirm: true });
     expect(out).toContain('requires a decision');
     expect(mockRespond).not.toHaveBeenCalled();
@@ -473,7 +529,7 @@ describe('manage_run — destructive confirmation gate', () => {
   test('respond with a non-default decision resolves through respondToWorkflow, not a cancel', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
     mockRespond.mockResolvedValue({ workflowName: 'wf', type: 'approval_gate' });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({
       action: 'respond',
       runId: 'r1abcdef',
@@ -496,7 +552,7 @@ describe('manage_run — destructive confirmation gate', () => {
       cancelled: true,
       maxAttemptsReached: false,
     });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({
       action: 'respond',
       runId: 'r1abcdef',
@@ -517,7 +573,7 @@ describe('manage_run — destructive confirmation gate', () => {
         )
       )
     );
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({
       action: 'respond',
       runId: 'r1abcdef',
@@ -539,6 +595,7 @@ describe('manage_run — gate continuation', () => {
       resolved,
       ctx: {
         codebaseId: CODEBASE_ID,
+        confirm: allow,
         onGateResolved: (run: WorkflowRun, action: 'approve' | 'reject' | 'respond') => {
           resolved.push({ run, action });
           return accepts;
@@ -652,7 +709,7 @@ describe('manage_run — gate continuation', () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'paused' })]);
     mockApprove.mockResolvedValue({ workflowName: 'wf', type: 'approval_gate' });
 
-    const out = await buildManageRunTool({ codebaseId: CODEBASE_ID }).handler({
+    const out = await buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow }).handler({
       action: 'approve',
       runId: 'r1abcdef',
       confirm: true,
@@ -667,7 +724,7 @@ describe('manage_run — resume (recoverable, no confirm)', () => {
   test('resume validates eligibility without confirm and does not restart the run', async () => {
     mockFindByPrefix.mockResolvedValue([makeRun({ status: 'failed' })]);
     mockResume.mockResolvedValue({ id: 'r1abcdef-1234', workflow_name: 'archon-assist' });
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'resume', runId: 'r1abcdef' });
     expect(out).toContain('can resume');
     expect(out).toContain('does not restart automatically');
@@ -678,7 +735,7 @@ describe('manage_run — resume (recoverable, no confirm)', () => {
 describe('manage_run — error handling', () => {
   test('a thrown DB error is returned as text, never thrown into the agent loop', async () => {
     mockFindByPrefix.mockImplementation(() => Promise.reject(new Error('db down')));
-    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID });
+    const tool = buildManageRunTool({ codebaseId: CODEBASE_ID, confirm: allow });
     const out = await tool.handler({ action: 'get', runId: 'r1abcdef' });
     expect(out).toContain('manage_run error: db down');
   });

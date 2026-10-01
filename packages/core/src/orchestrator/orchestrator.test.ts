@@ -25,6 +25,11 @@ async function canonicalizeForTest(p: string): Promise<string> {
   return await realpath(absolute).catch(() => absolute);
 }
 const mockCanonicalizeProjectPath = mock(canonicalizeForTest);
+// PERS-30 F11: model-emitted commands wait for a human click. These tests
+// exercise what follows an Allow; refusals are asserted where they matter.
+const mockConfirmWithHuman = mock((..._args: unknown[]) => Promise.resolve(true));
+mock.module('./human-confirm', () => ({ confirmWithHuman: mockConfirmWithHuman }));
+
 mock.module('@archon/paths', () => ({
   canonicalizeProjectPath: mockCanonicalizeProjectPath,
   captureApprovalResolved: () => undefined,
@@ -1239,6 +1244,27 @@ describe('orchestrator-agent handleMessage', () => {
 
       // Should dispatch to workflow after validation
       expect(mockValidateAndResolveIsolation).toHaveBeenCalled();
+    });
+
+    test('does not dispatch when the human declines the model command (PERS-30 F11)', async () => {
+      mockConfirmWithHuman.mockResolvedValueOnce(false);
+      mockValidateAndResolveIsolation.mockClear();
+      mockClient.sendQuery.mockImplementation(async function* () {
+        yield {
+          type: 'assistant',
+          content: 'On it.\n/invoke-workflow fix-bug --project test-project --prompt "x"',
+        };
+        yield { type: 'result', sessionId: 'session-id' };
+      });
+
+      await handleMessage(platform, 'chat-456', 'fix it');
+
+      expect(mockValidateAndResolveIsolation).not.toHaveBeenCalled();
+      expect(mockConfirmWithHuman.mock.calls.at(-1)?.[1]).toBe(
+        'Run workflow fix-bug on test-project?'
+      );
+      const sent = platform.sendMessage.mock.calls.map(c => c[1] as string);
+      expect(sent.some(m => m.startsWith('Not run: workflow `fix-bug`'))).toBe(true);
     });
 
     test('sends remaining message before dispatching workflow', async () => {
