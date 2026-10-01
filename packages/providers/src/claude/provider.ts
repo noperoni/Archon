@@ -1570,10 +1570,15 @@ export class ClaudeProvider implements IAgentProvider {
     // process.env never crosses the boundary (the isolation invariant); the host
     // path inherits the (already-cleaned) process env exactly as before.
     const env = buildRequestSubprocessEnv(requestOptions);
-    const settingSources =
+    // HK-47 fork (PERS-30): 'user' is where the danger gate's PreToolUse hook
+    // lives, so no node or assistant override may drop it.
+    const requestedSources =
       requestOptions?.nodeConfig?.settingSources ??
       assistantDefaults.settingSources ??
       (['project', 'user', 'local'] as const);
+    const settingSources = requestedSources.includes('user')
+      ? requestedSources
+      : [...requestedSources, 'user' as const];
 
     // Apply nodeConfig translation once (deterministic, not retry-dependent)
     // We need a throwaway Options to extract warnings from applyNodeConfig,

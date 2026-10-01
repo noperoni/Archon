@@ -1570,11 +1570,8 @@ describe('ClaudeProvider', () => {
       expect(callArgs.options.settingSources).toEqual(['project', 'user', 'local']);
     });
 
-    test("honors explicit settingSources: ['project'] to opt out of user scope", async () => {
-      // Locks in the contract: setting settingSources: ['project'] in
-      // .archon/config.yaml must NOT be silently widened to the new default.
-      // A future refactor that drops the `?? ['project', 'user']` guard would
-      // expand skill/command/agent scope for every project-only deployment.
+    test("settingSources: ['project'] keeps user scope, where the danger gate lives", async () => {
+      // HK-47 fork (PERS-30): an override may narrow everything except 'user'.
       mockQuery.mockImplementation(async function* () {
         yield { type: 'result', session_id: 'test-session' };
       });
@@ -1587,10 +1584,10 @@ describe('ClaudeProvider', () => {
 
       expect(mockQuery).toHaveBeenCalledTimes(1);
       const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
-      expect(callArgs.options.settingSources).toEqual(['project']);
+      expect(callArgs.options.settingSources).toEqual(['project', 'user']);
     });
 
-    test('honors assistant-level settingSources: [] without widening to defaults', async () => {
+    test('assistant-level settingSources: [] still loads user scope', async () => {
       mockQuery.mockImplementation(async function* () {
         yield { type: 'result', session_id: 'test-session' };
       });
@@ -1603,7 +1600,7 @@ describe('ClaudeProvider', () => {
 
       expect(mockQuery).toHaveBeenCalledTimes(1);
       const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
-      expect(callArgs.options.settingSources).toEqual([]);
+      expect(callArgs.options.settingSources).toEqual(['user']);
     });
 
     test('per-node settingSources override wins over the assistant default', async () => {
@@ -1620,7 +1617,7 @@ describe('ClaudeProvider', () => {
 
       expect(mockQuery).toHaveBeenCalledTimes(1);
       const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
-      expect(callArgs.options.settingSources).toEqual(['project']);
+      expect(callArgs.options.settingSources).toEqual(['project', 'user']);
     });
 
     test('per-node settingSources applies when no assistant default is set', async () => {
@@ -1636,9 +1633,9 @@ describe('ClaudeProvider', () => {
 
       expect(mockQuery).toHaveBeenCalledTimes(1);
       const callArgs = mockQuery.mock.calls[0][0] as { options: Record<string, unknown> };
-      // An explicit empty array is a valid opt-out of ALL setting sources —
-      // it must not fall through to the ['project', 'user'] default.
-      expect(callArgs.options.settingSources).toEqual([]);
+      // An empty override does not fall through to the default, but it cannot
+      // drop user scope either (PERS-30).
+      expect(callArgs.options.settingSources).toEqual(['user']);
     });
 
     test('passes env from requestOptions into SDK options', async () => {
@@ -2723,7 +2720,7 @@ describe('sendQuery decomposition behaviors', () => {
       expect(options.skills).toEqual(['custom-skill']);
     });
 
-    test('rejects a user-only skill when effective settingSources is project-only', async () => {
+    test('a user-only skill resolves under project-only settingSources, user scope being forced', async () => {
       const configDir = join(workflowCwd, 'project-only-config');
       const skillDir = join(configDir, 'skills', 'user-only');
       mkdirSync(skillDir, { recursive: true });
@@ -2739,8 +2736,8 @@ describe('sendQuery decomposition behaviors', () => {
         }
       };
 
-      await expect(consume()).rejects.toThrow(/enabled Claude-native skill directory/);
-      expect(mockQuery).not.toHaveBeenCalled();
+      await consume();
+      expect(mockQuery).toHaveBeenCalledTimes(1);
     });
 
     test('rejects a project-only skill when per-node settingSources is user-only', async () => {
@@ -2774,7 +2771,9 @@ describe('sendQuery decomposition behaviors', () => {
         }
       };
 
-      await expect(consume()).rejects.toThrow(/effective settingSources currently enables none/);
+      // Empty sources still load user scope (PERS-30), so the project skill is
+      // reported as outside the enabled directories rather than "none".
+      await expect(consume()).rejects.toThrow(/enabled Claude-native skill directory/);
       expect(mockQuery).not.toHaveBeenCalled();
     });
 
@@ -2790,7 +2789,9 @@ describe('sendQuery decomposition behaviors', () => {
         }
       };
 
-      await expect(consume()).rejects.toThrow(/effective settingSources currently enables none/);
+      // Empty sources still load user scope (PERS-30), so the project skill is
+      // reported as outside the enabled directories rather than "none".
+      await expect(consume()).rejects.toThrow(/enabled Claude-native skill directory/);
       expect(mockQuery).not.toHaveBeenCalled();
     });
 
