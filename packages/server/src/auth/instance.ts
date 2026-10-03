@@ -82,10 +82,15 @@ function buildAuth(env: NodeJS.ProcessEnv) {
   // Safe default: with no allowlist and no explicit open-signup flag, signup is
   // OFF (login only) rather than silently open on a reachable URL.
   const signupDisabled = getSignupMode(env) === 'disabled';
+  // HK-47 fork (PERS-31): with ARCHON_AUTH_FIRST_ACCOUNT_ONLY=true (alongside
+  // open signup), the login page creates exactly one account and then closes
+  // itself, with no restart and no email decided in advance.
+  const firstAccountOnly = env.ARCHON_AUTH_FIRST_ACCOUNT_ONLY === 'true';
 
   // Dedicated small pool; Better Auth requires a real pg.Pool. Retained at module
   // scope so closeAuth() can end it on shutdown.
   authPool = new Pool({ connectionString, max: 5 });
+  const pool = authPool;
 
   return betterAuth({
     database: authPool,
@@ -135,6 +140,16 @@ function buildAuth(env: NodeJS.ProcessEnv) {
               throw new APIError('FORBIDDEN', {
                 message: 'This email is not on the invite allowlist.',
               });
+            }
+            // ponytail: count-then-insert, so two sign-ups in the same instant
+            // could both pass; the cutover checks for exactly one account.
+            if (firstAccountOnly) {
+              const { rows } = await pool.query<{ n: string }>(
+                'SELECT count(*) AS n FROM remote_agent_auth_user'
+              );
+              if (Number(rows[0]?.n ?? 0) > 0) {
+                throw new APIError('FORBIDDEN', { message: 'An account already exists.' });
+              }
             }
             return { data: user };
           },

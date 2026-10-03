@@ -44,7 +44,13 @@ class FakePool {
   }
 
   end = endPool;
+
+  query = async (): Promise<{ rows: { n: string }[] }> => ({
+    rows: [{ n: String(existingAccounts) }],
+  });
 }
+
+let existingAccounts = 0;
 
 class FakeAPIError extends Error {
   readonly status: string;
@@ -136,6 +142,20 @@ describe('getAuth', (): void => {
 });
 
 describe('signup hook', (): void => {
+  test('first-account-only admits one account, then closes', async (): Promise<void> => {
+    getAuth(
+      enabledEnv({ ARCHON_AUTH_OPEN_SIGNUP: 'true', ARCHON_AUTH_FIRST_ACCOUNT_ONLY: 'true' })
+    );
+    const first = { email: 'first@example.test', name: 'First' };
+    existingAccounts = 0;
+    await expect(signupHook()(first)).resolves.toEqual({ data: first });
+    existingAccounts = 1;
+    await expect(signupHook()({ email: 'second@example.test' })).rejects.toThrow(
+      'An account already exists.'
+    );
+    existingAccounts = 0;
+  });
+
   test('rejects signup when the safe default disables it', async (): Promise<void> => {
     getAuth(enabledEnv({ ARCHON_AUTH_OPEN_SIGNUP: undefined }));
     expect(capturedOptions?.emailAndPassword.disableSignUp).toBe(true);
