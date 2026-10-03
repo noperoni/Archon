@@ -1992,6 +1992,17 @@ export function registerApiRoutes(
    * SECURITY: header trust is only safe when Archon is reachable solely through
    * a reverse proxy (bind 127.0.0.1). The server logs a startup warning otherwise.
    */
+  /**
+   * HK-47 fork (PERS-31): ARCHON_WEB_AUTH_HEADER=off removes header trust, so
+   * only a Better Auth session identifies anyone. Behind archon-gate every
+   * request arrives from loopback, and any local process could set the header.
+   */
+  function trustedHeaderName(): string | undefined {
+    const name = process.env.ARCHON_WEB_AUTH_HEADER;
+    if (name?.toLowerCase() === 'off') return undefined;
+    return name || 'X-Archon-User';
+  }
+
   async function resolveAuthContext(
     c: Context
   ): Promise<{ userId: string; role: UserRole } | undefined> {
@@ -2020,8 +2031,8 @@ export function registerApiRoutes(
     }
 
     // 2. Trusted reverse-proxy header.
-    const headerName = process.env.ARCHON_WEB_AUTH_HEADER || 'X-Archon-User';
-    const headerVal = c.req.header(headerName)?.trim();
+    const headerName = trustedHeaderName();
+    const headerVal = headerName ? c.req.header(headerName)?.trim() : undefined;
     if (!headerVal) return undefined;
     try {
       const user = await userDb.findOrCreateUserByPlatformIdentity('web', headerVal, headerVal);
@@ -2080,8 +2091,8 @@ export function registerApiRoutes(
     }
 
     // 2. Trusted reverse-proxy header.
-    const headerName = process.env.ARCHON_WEB_AUTH_HEADER || 'X-Archon-User';
-    const headerVal = c.req.header(headerName)?.trim();
+    const headerName = trustedHeaderName();
+    const headerVal = headerName ? c.req.header(headerName)?.trim() : undefined;
     if (!headerVal) return { error: apiError(c, 401, failMessage) };
     try {
       const user = await userDb.findOrCreateUserByPlatformIdentity('web', headerVal, headerVal);

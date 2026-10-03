@@ -253,6 +253,21 @@ describe('server-side /api/* gate', () => {
     expect(res.status).toBe(200);
   });
 
+  test('gate on + ARCHON_WEB_AUTH_HEADER=off → X-Archon-User is ignored (401)', async () => {
+    apiGateEnabled = true;
+    const prev = process.env.ARCHON_WEB_AUTH_HEADER;
+    process.env.ARCHON_WEB_AUTH_HEADER = 'off';
+    try {
+      const res = await makeApp().request('/api/conversations', {
+        headers: { 'X-Archon-User': 'alice' },
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      if (prev === undefined) delete process.env.ARCHON_WEB_AUTH_HEADER;
+      else process.env.ARCHON_WEB_AUTH_HEADER = prev;
+    }
+  });
+
   // Fail-closed: a session lookup that throws (e.g. DB outage) with NO trusted
   // header must NOT admit the request. resolveAuthContext swallows the throw and
   // returns undefined, which the gate maps to 401 — never access-granted.

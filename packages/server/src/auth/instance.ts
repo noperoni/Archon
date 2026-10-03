@@ -69,7 +69,9 @@ function buildAuth(env: NodeJS.ProcessEnv) {
   // isWebAuthEnabled guarantees both are present; locals avoid `!` assertions.
   const connectionString = env.DATABASE_URL ?? '';
   const secret = env.BETTER_AUTH_SECRET ?? '';
-  const trustedOrigins = (env.BETTER_AUTH_TRUSTED_ORIGINS ?? '')
+  // HK-47 fork (PERS-31): fall back to WEB_UI_ORIGIN, the list request-guard
+  // already admits, so the two origin checks cannot drift apart.
+  const trustedOrigins = (env.BETTER_AUTH_TRUSTED_ORIGINS ?? env.WEB_UI_ORIGIN ?? '')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean);
@@ -98,7 +100,14 @@ function buildAuth(env: NodeJS.ProcessEnv) {
     // hook below is the belt-and-suspenders for `allowlist` mode.
     emailAndPassword: { enabled: true, disableSignUp: signupDisabled },
     user: { modelName: 'remote_agent_auth_user' },
-    session: { modelName: 'remote_agent_auth_session' },
+    // HK-47 fork (PERS-31): one sign-in a day. A session lives 24h from sign-in
+    // and is never extended by use (updateAge beyond expiresIn), so a stolen
+    // cookie dies on schedule. The cookie is host-wide, so every tab shares it.
+    session: {
+      modelName: 'remote_agent_auth_session',
+      expiresIn: 60 * 60 * 24,
+      updateAge: 60 * 60 * 24 * 365,
+    },
     account: { modelName: 'remote_agent_auth_account' },
     verification: { modelName: 'remote_agent_auth_verification' },
     databaseHooks: {
